@@ -6,6 +6,9 @@ Adapted from VRAG/search_engine/search_engine.py, supporting:
 - Direct clip_client fallback for CLIP image encoding
 """
 
+from __future__ import annotations
+
+import asyncio
 import json
 import logging
 import math
@@ -107,12 +110,12 @@ class VRAGSearchEngine:
         self.embed_image_fn = embed_image_fn
         self.embedding_model = embedding_model
 
-    def _encode_text(self, text: str) -> list[float]:
+    async def _encode_text(self, text: str) -> list[float]:
         """Encode text query to embedding vector.
 
         Priority order:
-        1. embed_text_fn (injected, legacy OpenAI CLIP)
-        2. embedding_model (Esperanto, preferred for domestic models)
+        1. embedding_model (Esperanto, preferred for domestic models)
+        2. embed_text_fn (injected, legacy OpenAI CLIP)
         3. clip_client.embeddings.create (direct OpenAI SDK fallback)
 
         Args:
@@ -124,13 +127,7 @@ class VRAGSearchEngine:
         Raises:
             RuntimeError: If no text embedding is available.
         """
-        if self.embed_text_fn is not None:
-            try:
-                return self.embed_text_fn(text)
-            except RuntimeError:
-                # No API key available for text embedding — propagate to caller
-                raise
-
+        # Priority 1: embedding_model (Esperanto, domestic Chinese models)
         if self.embedding_model is not None:
             try:
                 results = self.embedding_model.embed([text])
@@ -140,29 +137,40 @@ class VRAGSearchEngine:
                         return embedding
                     return list(embedding)
             except Exception as e:
-                logger.warning(f"Embedding model failed: {e}")
-                raise RuntimeError(f"Embedding model unavailable: {e}") from e
+                logger.warning(f"Embedding model embed() failed: {e}")
 
-        if self.clip_client is None:
-            raise RuntimeError(
-                "No text embedding available. Provide embed_text_fn, "
-                "embedding_model, or ensure clip_client is set."
-            )
-        try:
-            response = self.clip_client.embeddings.create(
-                model="clip-ViT-L-14",
-                input=text,
-            )
-            return response.data[0].embedding
-        except Exception as e:
-            logger.warning(f"CLIP text encoding failed, falling back to text-embedding-3-large: {e}")
-            response = self.clip_client.embeddings.create(
-                model="text-embedding-3-large",
-                input=text,
-            )
-            return response.data[0].embedding
+        # Priority 2: embed_text_fn (legacy OpenAI CLIP) — sync, use thread pool
+        if self.embed_text_fn is not None:
+            try:
+                return await asyncio.to_thread(self.embed_text_fn, text)
+            except RuntimeError:
+                # No API key available — fall through to next option
+                pass
 
-    def _encode_image(self, image_path: str) -> list[float]:
+        # Priority 3: clip_client (direct OpenAI SDK fallback) — sync, use thread pool
+        if self.clip_client is not None:
+            try:
+                response = await asyncio.to_thread(
+                    self.clip_client.embeddings.create,
+                    model="clip-ViT-L-14",
+                    input=text,
+                )
+                return response.data[0].embedding
+            except Exception as e:
+                logger.warning(f"CLIP text encoding failed, falling back to text-embedding-3-large: {e}")
+                response = await asyncio.to_thread(
+                    self.clip_client.embeddings.create,
+                    model="text-embedding-3-large",
+                    input=text,
+                )
+                return response.data[0].embedding
+
+        raise RuntimeError(
+            "No text embedding available. Provide embedding_model, embed_text_fn, "
+            "or ensure clip_client is set."
+        )
+
+    async def _encode_image(self, image_path: str) -> list[float]:
         """Encode image to CLIP embedding.
 
         Priority order:
@@ -180,8 +188,9 @@ class VRAGSearchEngine:
         Returns:
             Embedding vector as list of floats.
         """
+        # Priority 1: embed_image_fn (legacy CLIP) — sync, use thread pool
         if self.embed_image_fn is not None:
-            return self.embed_image_fn(image_path)
+            return await asyncio.to_thread(self.embed_image_fn, image_path)
 
         # Most domestic models don't support image embeddings
         # Only try embedding_model if it has image capability
@@ -197,7 +206,8 @@ class VRAGSearchEngine:
             )
         image_base64 = image_to_base64(image_path)
         try:
-            response = self.clip_client.embeddings.create(
+            response = await asyncio.to_thread(
+                self.clip_client.embeddings.create,
                 model="clip-ViT-L-14",
                 input=[{
                     "type": "image_url",
@@ -209,41 +219,81 @@ class VRAGSearchEngine:
             logger.warning(f"CLIP image encoding failed: {e}")
             raise
 
-    def _vector_search(
+    async def _text_search(
         self,
-        query_vector: list[float],
-        table_name: str,
-        vector_column: str,
-        id_column: str,
+        query: str,
+        source_ids: Optional[list[str]],
         top_k: int,
-        filter_conditions: Optional[dict] = None,
-        result_type: str = "image",
+        result_type: str = "text",
     ) -> list[tuple[str, float, str]]:
-        """Perform vector search using SeekDB retrieval service.
+        """Perform text-based search via AIRetrievalService.
+
+        Uses AIRetrievalService.text_search which internally generates embeddings
+        and performs keyword + semantic matching.
 
         Args:
-            query_vector: Query embedding vector.
-            table_name: Table to search.
-            vector_column: Column containing embeddings (stored as JSON).
-            id_column: ID column name.
+            query: Search query string.
+            source_ids: Optional filter by source IDs.
             top_k: Number of results.
-            filter_conditions: Optional filter conditions.
-            result_type: Type of results ("image" or "text").
+            result_type: "text" or "image".
 
         Returns:
             List of (id, score, result_type) tuples.
         """
-        results = self.retrieval.vector_search(
-            query_vector=query_vector,
-            table_name=table_name,
-            vector_column=vector_column,
-            id_column=id_column,
-            top_k=top_k,
-            filter_conditions=filter_conditions,
+        results = await self.retrieval.text_search(
+            keyword=query,
+            source_ids=source_ids,
+            results=top_k,
+            note=False,
         )
-        return [(r["id"], r["score"], result_type) for r in results]
+        return [
+            (r.get("id", ""), float(r.get("relevance") or r.get("score") or 0.5), result_type)
+            for r in results
+        ]
 
-    def _get_image_results(
+    async def _image_search(
+        self,
+        query: str,
+        source_ids: Optional[list[str]],
+        top_k: int,
+    ) -> list[tuple[str, float, str]]:
+        """Perform image search via AIRetrievalService.
+
+        Uses AIRetrievalService.text_search for keyword-based image lookup.
+        Image chunks have image_summary + description fields that get matched.
+
+        Args:
+            query: Search query string.
+            source_ids: Optional filter by source IDs.
+            top_k: Number of results.
+
+        Returns:
+            List of (id, score, "image") tuples.
+        """
+        # Call text_search directly (async) instead of the sync wrapper,
+        # avoiding the asyncio.get_event_loop() RuntimeError in worker threads.
+        results = await self.retrieval.text_search(
+            keyword=query,
+            results=top_k * 2,  # Over-fetch for RRF fusion
+            source_ids=source_ids,
+            note=False,
+        )
+        # Filter to only image chunks
+        image_results = [
+            r
+            for r in results
+            if r.get("entity_type") == "image" or r.get("source_kind") == "image"
+        ]
+        return [
+            (
+                r.get("id", ""),
+                float(r.get("relevance") or r.get("score") or 0.5),
+                "image",
+            )
+            for r in image_results[:top_k]
+        ]
+
+    async def _get_image_results(
         self,
         chunk_ids: list[str],
         include_base64: bool = False,
@@ -260,8 +310,7 @@ class VRAGSearchEngine:
         if not chunk_ids:
             return []
 
-        chunks = self.retrieval.get_chunks_by_ids(
-            table_name="ai_image_chunks",
+        chunks = await self.retrieval.get_image_chunks_by_ids(
             ids=chunk_ids,
         )
 
@@ -271,7 +320,7 @@ class VRAGSearchEngine:
             image_base64 = None
             if include_base64 and image_path:
                 try:
-                    image_base64 = image_to_base64(image_path)
+                    image_base64 = await asyncio.to_thread(image_to_base64, image_path)
                 except Exception:
                     pass
 
@@ -289,7 +338,7 @@ class VRAGSearchEngine:
 
         return results
 
-    def _get_text_results(
+    async def _get_text_results(
         self,
         chunk_ids: list[str],
     ) -> list[VRAGSearchResult]:
@@ -304,10 +353,9 @@ class VRAGSearchEngine:
         if not chunk_ids:
             return []
 
-        chunks = self.retrieval.get_chunks_by_ids(
-            table_name="ai_source_chunks",
-            ids=chunk_ids,
-        )
+        # Call SeekDB directly (async) instead of the sync wrapper,
+        # avoiding the asyncio.get_event_loop() RuntimeError in worker threads.
+        chunks = await self.retrieval.get_text_chunks_by_ids(chunk_ids)
 
         results = []
         for chunk in chunks:
@@ -322,13 +370,16 @@ class VRAGSearchEngine:
 
         return results
 
-    def search_images_by_text(
+    async def search_images_by_text(
         self,
         query: str,
         source_ids: Optional[list[str]] = None,
         top_k: Optional[int] = None,
     ) -> list[tuple[str, float, str]]:
-        """Search images by text query using CLIP embeddings.
+        """Search images by text query.
+
+        Uses AIRetrievalService.search_images_sync which searches image chunks
+        by their text descriptions (image_summary, page text).
 
         Args:
             query: Text search query.
@@ -339,36 +390,22 @@ class VRAGSearchEngine:
             List of (chunk_id, score, result_type) tuples.
         """
         top_k = top_k or self.default_top_k
-        try:
-            query_vector = self._encode_text(query)
-        except RuntimeError as e:
-            logger.warning(f"Text encoding failed, skipping image search: {e}")
-            return []
+        return await self._image_search(query, source_ids, top_k)
 
-        filter_conditions = {}
-        if source_ids:
-            filter_conditions["source_id"] = source_ids
-
-        return self._vector_search(
-            query_vector=query_vector,
-            table_name="ai_image_chunks",
-            vector_column="embedding_json",
-            id_column="id",
-            top_k=top_k,
-            filter_conditions=filter_conditions if filter_conditions else None,
-            result_type="image",
-        )
-
-    def search_images_by_image(
+    async def search_images_by_image(
         self,
         image_path: str,
         source_ids: Optional[list[str]] = None,
         top_k: Optional[int] = None,
     ) -> list[tuple[str, float, str]]:
-        """Search images by image query using CLIP embeddings.
+        """Search similar images by query image.
+
+        Uses AIRetrievalService.search_images_sync which searches image chunks
+        by their text descriptions. True image-to-image similarity requires
+        a dedicated multimodal embedding model.
 
         Args:
-            image_path: Path to the query image.
+            image_path: Path to the query image (used as keyword for search).
             source_ids: Optional filter by source IDs.
             top_k: Number of results (default: self.default_top_k).
 
@@ -376,29 +413,19 @@ class VRAGSearchEngine:
             List of (chunk_id, score, result_type) tuples.
         """
         top_k = top_k or self.default_top_k
-        query_vector = self._encode_image(image_path)
+        # Use the image path filename as a text query for image search
+        query = f"image: {image_path.split('/')[-1]}"
+        return await self._image_search(query, source_ids, top_k)
 
-        filter_conditions = {}
-        if source_ids:
-            filter_conditions["source_id"] = source_ids
-
-        return self._vector_search(
-            query_vector=query_vector,
-            table_name="ai_image_chunks",
-            vector_column="embedding_json",
-            id_column="id",
-            top_k=top_k,
-            filter_conditions=filter_conditions if filter_conditions else None,
-            result_type="image",
-        )
-
-    def search_text_chunks(
+    async def search_text_chunks(
         self,
         query: str,
         source_ids: Optional[list[str]] = None,
         top_k: Optional[int] = None,
     ) -> list[tuple[str, float, str]]:
-        """Search text chunks using text embeddings.
+        """Search text chunks using text query.
+
+        Uses AIRetrievalService.text_search for semantic + keyword matching.
 
         Args:
             query: Text search query.
@@ -409,26 +436,7 @@ class VRAGSearchEngine:
             List of (chunk_id, score, result_type) tuples.
         """
         top_k = top_k or self.default_top_k
-
-        try:
-            query_vector = self._encode_text(query)
-        except RuntimeError as e:
-            logger.warning(f"Text encoding failed, skipping text search: {e}")
-            return []
-
-        filter_conditions = {}
-        if source_ids:
-            filter_conditions["source_id"] = source_ids
-
-        return self._vector_search(
-            query_vector=query_vector,
-            table_name="ai_source_chunks",
-            vector_column="embedding_json",
-            id_column="id",
-            top_k=top_k,
-            filter_conditions=filter_conditions if filter_conditions else None,
-            result_type="text",
-        )
+        return await self._text_search(query, source_ids, top_k)
 
     def rrf_fusion(
         self,
@@ -469,7 +477,7 @@ class VRAGSearchEngine:
 
         return sorted_results
 
-    def search_hybrid(
+    async def search_hybrid(
         self,
         query: str,
         query_image_path: Optional[str] = None,
@@ -502,33 +510,42 @@ class VRAGSearchEngine:
 
         ranked_lists = []
 
-        # Text → Image search
-        image_results = self.search_images_by_text(
-            query=query,
-            source_ids=source_ids,
-            top_k=image_top_k,
-        )
-        if image_results:
-            ranked_lists.append(image_results)
-
-        # Image → Image search (if query image provided)
-        if query_image_path:
-            visual_results = self.search_images_by_image(
-                image_path=query_image_path,
+        # Gather all searches in parallel using asyncio.gather
+        search_tasks = [
+            self.search_images_by_text(
+                query=query,
                 source_ids=source_ids,
                 top_k=image_top_k,
+            ),
+            self.search_text_chunks(
+                query=query,
+                source_ids=source_ids,
+                top_k=text_top_k,
+            ),
+        ]
+        if query_image_path:
+            search_tasks.append(
+                self.search_images_by_image(
+                    image_path=query_image_path,
+                    source_ids=source_ids,
+                    top_k=image_top_k,
+                )
             )
-            if visual_results:
-                ranked_lists.append(visual_results)
 
-        # Text → Text search
-        text_results = self.search_text_chunks(
-            query=query,
-            source_ids=source_ids,
-            top_k=text_top_k,
-        )
+        search_results = await asyncio.gather(*search_tasks)
+
+        # search_results[0] = image search, [1] = text search, [2] = image→image (optional)
+        image_results = search_results[0]
+        text_results = search_results[1]
+
+        if image_results:
+            ranked_lists.append(image_results)
         if text_results:
             ranked_lists.append(text_results)
+        if query_image_path and len(search_results) > 2:
+            visual_results = search_results[2]
+            if visual_results:
+                ranked_lists.append(visual_results)
 
         # RRF fusion
         if not ranked_lists:
@@ -536,16 +553,29 @@ class VRAGSearchEngine:
 
         fused = self.rrf_fusion(ranked_lists)
 
-        # Fetch full result details
+        # Fetch full result details in parallel
         image_ids = [cid for cid, score, rtype in fused if rtype == "image"]
         text_ids = [cid for cid, score, rtype in fused if rtype == "text"]
 
-        image_results_detail = self._get_image_results(image_ids, include_base64=include_image_base64)
-        text_results_detail = self._get_text_results(text_ids)
+        detail_tasks = []
+        if image_ids:
+            detail_tasks.append(
+                self._get_image_results(image_ids, include_base64=include_image_base64)
+            )
+        if text_ids:
+            detail_tasks.append(self._get_text_results(text_ids))
+
+        if detail_tasks:
+            detail_results_list = await asyncio.gather(*detail_tasks)
+            detail_results = []
+            for dr in detail_results_list:
+                detail_results.extend(dr)
+        else:
+            detail_results = []
 
         # Re-score and combine
         id_to_result: dict[str, VRAGSearchResult] = {}
-        for r in image_results_detail + text_results_detail:
+        for r in detail_results:
             id_to_result[r.chunk_id] = r
 
         # Apply RRF scores

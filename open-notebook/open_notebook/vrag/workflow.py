@@ -86,7 +86,7 @@ def _llm_invoke(
 
 # --- Node Functions ---
 
-def agent_node(state: VRAGState, tools: VRAGTools) -> dict:
+async def agent_node(state: VRAGState, tools: VRAGTools) -> dict:
     """Agent decision node — LLM decides what to do next.
 
     This node uses the LLM to analyze the current state and decide
@@ -231,7 +231,7 @@ def trigger_condition(state: VRAGState) -> str:
     return state.current_step
 
 
-def search_action_node(state: VRAGState, tools: VRAGTools) -> dict:
+async def search_action_node(state: VRAGState, tools: VRAGTools) -> dict:
     """Execute search action — multimodal retrieval.
 
     Args:
@@ -242,7 +242,7 @@ def search_action_node(state: VRAGState, tools: VRAGTools) -> dict:
         Updated state dictionary.
     """
     try:
-        result = tools.search(
+        result = await tools.search(
             query=state.question,
             source_ids=state.source_ids,
         )
@@ -322,7 +322,7 @@ def search_action_node(state: VRAGState, tools: VRAGTools) -> dict:
         }
 
 
-def bbox_crop_action_node(state: VRAGState, tools: VRAGTools) -> dict:
+async def bbox_crop_action_node(state: VRAGState, tools: VRAGTools) -> dict:
     """Execute bbox crop action — crop a region from an image.
 
     Args:
@@ -393,7 +393,7 @@ def bbox_crop_action_node(state: VRAGState, tools: VRAGTools) -> dict:
         }
 
 
-def summarize_action_node(state: VRAGState, tools: VRAGTools) -> dict:
+async def summarize_action_node(state: VRAGState, tools: VRAGTools) -> dict:
     """Execute summarize action — analyze evidence and update memory.
 
     Args:
@@ -444,7 +444,7 @@ def summarize_action_node(state: VRAGState, tools: VRAGTools) -> dict:
         }
 
 
-def answer_action_node(state: VRAGState, tools: VRAGTools) -> dict:
+async def answer_action_node(state: VRAGState, tools: VRAGTools) -> dict:
     """Execute answer action — generate final answer.
 
     Args:
@@ -510,20 +510,20 @@ def create_vrag_graph(tools: VRAGTools) -> StateGraph:
         Compiled StateGraph for VRAG workflow.
     """
 
-    def _agent_node_wrapper(state: VRAGState) -> dict:
-        return agent_node(state, tools)
+    async def _agent_node_wrapper(state: VRAGState) -> dict:
+        return await agent_node(state, tools)
 
-    def _search_wrapper(state: VRAGState) -> dict:
-        return search_action_node(state, tools)
+    async def _search_wrapper(state: VRAGState) -> dict:
+        return await search_action_node(state, tools)
 
-    def _bbox_wrapper(state: VRAGState) -> dict:
-        return bbox_crop_action_node(state, tools)
+    async def _bbox_wrapper(state: VRAGState) -> dict:
+        return await bbox_crop_action_node(state, tools)
 
-    def _summarize_wrapper(state: VRAGState) -> dict:
-        return summarize_action_node(state, tools)
+    async def _summarize_wrapper(state: VRAGState) -> dict:
+        return await summarize_action_node(state, tools)
 
-    def _answer_wrapper(state: VRAGState) -> dict:
-        return answer_action_node(state, tools)
+    async def _answer_wrapper(state: VRAGState) -> dict:
+        return await answer_action_node(state, tools)
 
     # Define the graph
     workflow = StateGraph(VRAGState)
@@ -562,10 +562,10 @@ def create_vrag_graph(tools: VRAGTools) -> StateGraph:
 
 # --- Streaming support ---
 
-def stream_graph_updates(graph, initial_state: VRAGState):
+async def stream_graph_updates(graph, initial_state: VRAGState):
     """Stream graph execution updates for SSE.
 
-    This generator yields state updates as they occur, enabling
+    This async generator yields state updates as they occur, enabling
     real-time UI updates on the frontend.
 
     Args:
@@ -575,8 +575,8 @@ def stream_graph_updates(graph, initial_state: VRAGState):
     Yields:
         State update dictionaries with dag_updates for frontend rendering.
     """
-    # Run the graph with streaming
-    for event in graph.stream(initial_state):
+    # Run the graph with async streaming
+    async for event in graph.astream(initial_state):
         for node_name, node_output in event.items():
             if "dag_updates" in node_output:
                 for update in node_output["dag_updates"]:

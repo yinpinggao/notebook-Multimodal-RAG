@@ -634,4 +634,145 @@ class AIRetrievalService:
         }
 
 
+    async def get_image_chunks_by_ids(
+        self, ids: list[str]
+    ) -> list[dict[str, Any]]:
+        """Fetch image chunks by their IDs.
+
+        Args:
+            ids: List of image chunk IDs to fetch.
+
+        Returns:
+            List of image chunk records with fields:
+            id, source_id, page_no, image_path, image_summary, bbox_regions, embedding_json.
+        """
+        if not ids:
+            return []
+        placeholders = ", ".join(["%s"] * len(ids))
+        return await seekdb_client.fetch_all(
+            f"""
+            SELECT id, source_id, page_no, image_path, image_summary, bbox_regions, embedding_json
+            FROM ai_image_chunks
+            WHERE id IN ({placeholders})
+            """,
+            tuple(ids),
+        )
+
+
+# --------------------------------------------------------------------------
+    # VRAG Search Helpers (sync wrappers for VRAG search_engine.py)
+    # --------------------------------------------------------------------------
+
+    def search_images_sync(
+        self, query: str, source_ids: Optional[list[str]], top_k: int
+    ) -> list[dict[str, Any]]:
+        """Sync wrapper for image search — called by VRAG search_engine.
+
+        Uses text_search for keyword-based image lookup. Image chunks have
+        image_summary + description fields that get matched.
+        """
+        import asyncio
+
+        async def _run():
+            results = await self.text_search(
+                keyword=query,
+                results=top_k * 2,  # Over-fetch for RRF fusion
+                source_ids=source_ids,
+                note=False,
+            )
+            # Filter to only image chunks
+            return [
+                r
+                for r in results
+                if r.get("entity_type") == "image"
+                or r.get("source_kind") == "image"
+            ]
+
+        return asyncio.get_event_loop().run_until_complete(_run())[:top_k]
+
+    def search_text_chunks_sync(
+        self, query: str, source_ids: Optional[list[str]], top_k: int
+    ) -> list[dict[str, Any]]:
+        """Sync wrapper for text chunk search — called by VRAG search_engine."""
+        import asyncio
+
+        async def _run():
+            results = await self.text_search(
+                keyword=query,
+                results=top_k * 2,
+                source_ids=source_ids,
+                note=False,
+            )
+            # Filter to only chunk results
+            return [
+                r
+                for r in results
+                if r.get("entity_type") == "chunk"
+                or r.get("source_kind") == "chunk"
+            ]
+
+        return asyncio.get_event_loop().run_until_complete(_run())[:top_k]
+
+    def get_text_chunks_sync(self, ids: list[str]) -> list[dict[str, Any]]:
+        """Fetch text chunks by IDs — called by VRAG search_engine."""
+        import asyncio
+
+        async def _run():
+            if not ids:
+                return []
+            placeholders = ", ".join(["%s"] * len(ids))
+            return await seekdb_client.fetch_all(
+                f"""
+                SELECT id, source_id, page_no, page_id, filename, content, title
+                FROM ai_source_chunks
+                WHERE id IN ({placeholders})
+                """,
+                tuple(ids),
+            )
+
+        return asyncio.get_event_loop().run_until_complete(_run())
+
+    async def get_text_chunks_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
+        """Fetch text chunks by IDs — async version for VRAG search_engine.
+
+        Args:
+            ids: List of chunk IDs to fetch.
+
+        Returns:
+            List of chunk dicts with id, source_id, page_no, content fields.
+        """
+        if not ids:
+            return []
+        placeholders = ", ".join(["%s"] * len(ids))
+        return await seekdb_client.fetch_all(
+            f"""
+            SELECT id, source_id, page_no, page_id, filename, content, title
+            FROM ai_source_chunks
+            WHERE id IN ({placeholders})
+            """,
+            tuple(ids),
+        )
+
+    def get_image_chunks_sync(
+        self, ids: list[str], include_base64: bool = False
+    ) -> list[dict[str, Any]]:
+        """Fetch image chunks by IDs — called by VRAG search_engine."""
+        import asyncio
+
+        async def _run():
+            if not ids:
+                return []
+            placeholders = ", ".join(["%s"] * len(ids))
+            return await seekdb_client.fetch_all(
+                f"""
+                SELECT id, source_id, page_no, image_path, image_summary, bbox_regions
+                FROM ai_image_chunks
+                WHERE id IN ({placeholders})
+                """,
+                tuple(ids),
+            )
+
+        return asyncio.get_event_loop().run_until_complete(_run())
+
+
 ai_retrieval_service = AIRetrievalService()

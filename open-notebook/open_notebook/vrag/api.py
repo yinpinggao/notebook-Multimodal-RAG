@@ -104,7 +104,7 @@ async def stream_vrag_events(
     graph = create_vrag_graph(tools)
 
     try:
-        for event in graph.stream(initial_state):
+        async for event in graph.astream(initial_state):
             for node_name, node_output in event.items():
                 if "dag_updates" in node_output:
                     for update in node_output["dag_updates"]:
@@ -144,6 +144,7 @@ async def vrag_chat_stream(request: VRAGChatRequest):
 
     # Get embedding model via model_manager (supports domestic Chinese models)
     embedding_model = await model_manager.get_default_model("embedding")
+    logger.info(f"VRAG embedding model: {embedding_model}")
 
     search_engine = VRAGSearchEngine(
         retrieval_service=ai_retrieval_service,
@@ -155,8 +156,10 @@ async def vrag_chat_stream(request: VRAGChatRequest):
         # Domestic embedding model via Esperanto (preferred)
         embedding_model=embedding_model,
     )
+    logger.info(f"VRAG search engine created with embedding_model: {embedding_model}")
 
     llm = await provision_langchain_model(content="", model_id=None, default_type="chat")
+    logger.info(f"VRAG LLM model: {llm}")
 
     tools = VRAGTools(
         search_engine=search_engine,
@@ -244,7 +247,7 @@ async def vrag_search(request: VRAGSearchRequest):
         include_image_base64=request.include_image_base64,
     )
 
-    result = tools.search(
+    result = await tools.search(
         query=request.query,
         source_ids=request.source_ids,
         image_top_k=request.image_top_k,

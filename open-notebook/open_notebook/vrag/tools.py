@@ -4,6 +4,7 @@ These tools are used by the VRAG Agent to interact with the multimodal search
 engine, perform image operations, and generate answers.
 """
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -100,7 +101,7 @@ class VRAGTools:
     include_image_base64: bool = True
     default_top_k: int = 5
 
-    def search(
+    async def search(
         self,
         query: str,
         source_ids: Optional[list[str]] = None,
@@ -120,7 +121,7 @@ class VRAGTools:
         Returns:
             SearchResult containing matched images and text chunks.
         """
-        results = self.search_engine.search_hybrid(
+        results = await self.search_engine.search_hybrid(
             query=query,
             query_image_path=query_image_path,
             source_ids=source_ids,
