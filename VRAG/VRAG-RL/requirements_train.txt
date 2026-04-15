@@ -1,0 +1,23 @@
+# Training dependencies for VRAG-RL
+# Includes all demo dependencies plus training-specific packages
+-r requirements_demo.txt
+
+# Training-specific dependencies
+accelerate
+codetiming
+datasets
+dill
+flash-attn
+hydra-core
+liger-kernel
+math-verify[antlr4_9_3]
+numpy
+pandas
+peft
+pyarrow>=15.0.0
+pybind11
+pylatexenc
+ray[default]
+tensordict<0.6
+torchdata
+wandb

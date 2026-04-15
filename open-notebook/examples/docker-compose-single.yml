@@ -1,0 +1,53 @@
+services:
+  seekdb:
+    image: oceanbase/seekdb:latest
+    entrypoint:
+      - /bin/bash
+      - /root/seekdb-start-fixed.sh
+    ports:
+      - "2881:2881"
+      - "2886:2886"
+    environment:
+      - ROOT_PASSWORD=${SEEKDB_ROOT_PASSWORD:-SeekDBRoot123!}
+      - SEEKDB_DATABASE=${SEEKDB_DATABASE:-open_notebook_ai}
+    volumes:
+      - seekdb_data:/var/lib/oceanbase
+      - ./scripts/seekdb-start-fixed.sh:/root/seekdb-start-fixed.sh:ro
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --appendonly no
+    restart: always
+
+  open_notebook_single:
+    # image: lfnovo/open_notebook:v1-latest-single
+    build:
+      context: .
+      dockerfile: Dockerfile.single
+    ports:
+      - "8502:8502"  # Next.js Frontend
+      - "5055:5055"  # REST API
+    env_file:
+      - ./docker.env
+    environment:
+      # SeekDB database connection (MySQL protocol)
+      - OPEN_NOTEBOOK_SEEKDB_DSN=${OPEN_NOTEBOOK_SEEKDB_DSN:-mysql://root:SeekDBRoot123%21@seekdb:2881/open_notebook_ai}
+      - OPEN_NOTEBOOK_AI_CONFIG_BACKEND=seekdb
+      - OPEN_NOTEBOOK_SEARCH_BACKEND=seekdb
+      - OPEN_NOTEBOOK_JOB_BACKEND=arq
+      - OPEN_NOTEBOOK_REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./notebook_data:/app/data          # Application data
+    depends_on:
+      - seekdb
+      - redis
+    restart: always
+    # Services: SeekDB, Redis, API, Worker, and Next.js Frontend
+    # Access:
+    # - Next.js UI: http://localhost:8502
+    # - REST API: http://localhost:5055
+    # - API Documentation: http://localhost:5055/docs
+
+volumes:
+  seekdb_data:

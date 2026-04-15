@@ -1,0 +1,17 @@
+services:
+  open_notebook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8502:8502"
+      - "5055:5055"
+    env_file:
+      - ./docker.env
+    depends_on:
+      - seekdb
+      - redis
+    volumes:
+      - ./notebook_data:/app/data
+    restart: always
+    

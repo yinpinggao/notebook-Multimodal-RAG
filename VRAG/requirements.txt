@@ -1,0 +1,31 @@
+# Core ML framework
+torch>=2.0.0
+transformers>=4.50.3
+numpy>=1.24.0
+
+# Vision and multimedia
+pillow>=10.0.0
+torchcodec>=0.1.0
+qwen-vl-utils>=0.0.1
+
+# LLM serving and API
+vllm>=0.8.2
+openai>=1.0.0
+
+# Search and indexing
+faiss-gpu>=1.8.0  # Use faiss-cpu if no GPU available
+
+# Web framework
+fastapi>=0.100.0
+uvicorn>=0.23.0
+streamlit>=1.28.0
+
+# Utilities
+requests>=2.31.0
+json5>=0.9.0
+tqdm>=4.66.0
+
+# Optional: for specific embedding models
+peft>=0.4.0  # Needed for GVE model LoRA support
+sentence-transformers>=2.2.0  # Needed for bge-m3 embedding model
+pdf2image>=1.16.0  # Needed for corpus preparation from PDF files

@@ -1,0 +1,39 @@
+services:
+  seekdb:
+    image: oceanbase/seekdb:latest
+    entrypoint:
+      - /bin/bash
+      - /root/seekdb-start-fixed.sh
+    ports:
+      - "2881:2881"
+      - "2886:2886"
+    environment:
+      - ROOT_PASSWORD=${SEEKDB_ROOT_PASSWORD:-SeekDBRoot123!}
+      - SEEKDB_DATABASE=${SEEKDB_DATABASE:-open_notebook_ai}
+    volumes:
+      - seekdb_data:/var/lib/oceanbase
+      - ./scripts/seekdb-start-fixed.sh:/root/seekdb-start-fixed.sh:ro
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --appendonly no
+    ports:
+      - "6379:6379"
+    restart: always
+
+  open_notebook:
+    depends_on:
+      - seekdb
+      - redis
+    environment:
+      - OPEN_NOTEBOOK_SEEKDB_DSN=${OPEN_NOTEBOOK_SEEKDB_DSN:-mysql://root:SeekDBRoot123%21@seekdb:2881/open_notebook_ai}
+      - OPEN_NOTEBOOK_AI_CONFIG_BACKEND=${OPEN_NOTEBOOK_AI_CONFIG_BACKEND:-seekdb}
+      - OPEN_NOTEBOOK_SEARCH_BACKEND=${OPEN_NOTEBOOK_SEARCH_BACKEND:-seekdb}
+      - OPEN_NOTEBOOK_JOB_BACKEND=${OPEN_NOTEBOOK_JOB_BACKEND:-arq}
+      - OPEN_NOTEBOOK_REDIS_URL=${OPEN_NOTEBOOK_REDIS_URL:-redis://redis:6379/0}
+      - OPEN_NOTEBOOK_SEEKDB_POOL_SIZE=${OPEN_NOTEBOOK_SEEKDB_POOL_SIZE:-5}
+      - OPEN_NOTEBOOK_SEEKDB_TIMEOUT_SECONDS=${OPEN_NOTEBOOK_SEEKDB_TIMEOUT_SECONDS:-10}
+
+volumes:
+  seekdb_data:

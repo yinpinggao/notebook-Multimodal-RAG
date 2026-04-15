@@ -1,0 +1,40 @@
+services:
+  seekdb:
+    image: oceanbase/seekdb:latest
+    entrypoint:
+      - /bin/bash
+      - /root/seekdb-start-fixed.sh
+    ports:
+      - "2881:2881"
+      - "2886:2886"
+    environment:
+      - ROOT_PASSWORD=${SEEKDB_ROOT_PASSWORD:-SeekDBRoot123!}
+      - SEEKDB_DATABASE=${SEEKDB_DATABASE:-open_notebook_ai}
+    volumes:
+      - seekdb_data:/var/lib/oceanbase
+      - ./scripts/seekdb-start-fixed.sh:/root/seekdb-start-fixed.sh:ro
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save "" --appendonly no
+    restart: always
+
+  open_notebook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8502:8502"
+      - "5055:5055"
+    env_file:
+      - ./docker.env
+    depends_on:
+      - seekdb
+      - redis
+    volumes:
+      - ./notebook_data:/app/data
+    restart: always
+
+volumes:
+  seekdb_data:
