@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { VRAGMemoryNode, VRAGImageResult } from '@/lib/types/api'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import {
@@ -30,6 +30,8 @@ interface LightboxProps {
 }
 
 function ImageLightbox({ image, onClose }: LightboxProps) {
+  const imageUrl = image.file_url || image.image_path
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
@@ -53,10 +55,10 @@ function ImageLightbox({ image, onClose }: LightboxProps) {
             alt={`Page ${image.page_no}`}
             className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-2xl"
           />
-        ) : image.image_path ? (
+        ) : imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={image.image_path}
+            src={imageUrl}
             alt={`Page ${image.page_no}`}
             className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-2xl"
             onError={(e) => {
@@ -109,9 +111,9 @@ function ImageLightbox({ image, onClose }: LightboxProps) {
             </p>
           )}
 
-          {image.image_path && (
+          {imageUrl && (
             <a
-              href={image.image_path}
+              href={imageUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 mt-2 text-xs text-blue-300 hover:text-blue-200 transition-colors"
@@ -159,11 +161,12 @@ function ImageCard({
 }) {
   const [imgError, setImgError] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
+  const imageUrl = image.file_url || image.image_path
 
   const hasImage =
     image.image_base64 && !imgError
       ? `data:image/png;base64,${image.image_base64}`
-      : image.image_path && !imgError
+      : imageUrl && !imgError
 
   return (
     <>
@@ -185,7 +188,7 @@ function ImageCard({
                 src={
                   image.image_base64 && !imgError
                     ? `data:image/png;base64,${image.image_base64}`
-                    : image.image_path || ''
+                    : imageUrl || ''
                 }
                 alt={`Page ${image.page_no}`}
                 className="w-full h-full object-cover transition-transform hover:scale-105"
@@ -333,7 +336,9 @@ function DAGNodeCard({
               </p>
               <div className="grid grid-cols-3 gap-1">
                 {node.images.slice(0, 6).map((imgPath, idx) => {
-                  const imgData = searchResults.find(r => r.image_path === imgPath)
+                  const imgData = searchResults.find(r => (
+                    r.file_url === imgPath || r.image_path === imgPath
+                  ))
                   return imgData ? (
                     <ImageCard key={idx} image={imgData} compact />
                   ) : (

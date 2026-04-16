@@ -747,6 +747,8 @@ export const enUS = {
       indexed: "Indexed",
       notIndexed: "Not indexed",
       indexing: "Indexing...",
+      queued: "Indexing queued",
+      error: "Error",
       indexSuccess: "Indexing complete",
       indexError: "Indexing failed",
       rebuildSuccess: "Rebuild complete",

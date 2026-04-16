@@ -15,6 +15,13 @@ export interface VRAGStreamResponse {
   headers: Headers
 }
 
+export interface CommandJobStatusResponse {
+  job_id: string
+  status: string
+  result?: Record<string, unknown>
+  error_message?: string
+}
+
 export const vragApi = {
   // VRAG Chat with streaming
   sendMessage: (_notebookId: string, data: CreateVRAGChatRequest, signal?: AbortSignal) => {
@@ -34,7 +41,7 @@ export const vragApi = {
       }
     }
 
-    const url = `/api/vrag/chat/stream`
+    const url = `/api/visual-rag/chat/stream`
 
     // Use fetch with ReadableStream for SSE
     return fetch(url, {
@@ -58,16 +65,16 @@ export const vragApi = {
 
   // Direct multimodal search without agent
   search: async (data: SearchVRAGRequest) => {
-    const response = await apiClient.post<VRAGSearchResult>('/vrag/search', data)
+    const response = await apiClient.post<VRAGSearchResult>('/visual-rag/search', data)
     return response.data
   },
 
   // Index a source for multimodal search
-  indexSource: async (sourceId: string, sourcePath: string, sourceType: string = 'pdf', generateSummaries: boolean = true, dpi?: number) => {
-    const response = await apiClient.post<VRAGIndexResult>('/vrag/index', {
+  indexSource: async (sourceId: string, _sourcePath: string = '', _sourceType: string = 'pdf', generateSummaries: boolean = true, dpi?: number) => {
+    void _sourcePath
+    void _sourceType
+    const response = await apiClient.post<VRAGIndexResult>('/visual-rag/index', {
       source_id: sourceId,
-      source_path: sourcePath,
-      source_type: sourceType,
       generate_summaries: generateSummaries,
       dpi: dpi
     })
@@ -76,13 +83,35 @@ export const vragApi = {
 
   // Rebuild VRAG index for a source
   rebuildIndex: async (sourceId: string, generateSummaries: boolean = true) => {
-    const response = await apiClient.post<VRAGIndexResult>('/vrag/reindex', {
+    const response = await apiClient.post<VRAGIndexResult>('/visual-rag/reindex', {
       source_id: sourceId,
-      source_path: '',
-      source_type: 'pdf',
       generate_summaries: generateSummaries
     })
     return response.data
+  },
+
+  getCommandStatus: async (commandId: string) => {
+    const response = await apiClient.get<CommandJobStatusResponse>(
+      `/commands/jobs/${commandId}`
+    )
+    return response.data
+  },
+
+  waitForCommand: async (
+    commandId: string,
+    options?: { maxAttempts?: number; intervalMs?: number }
+  ): Promise<CommandJobStatusResponse | null> => {
+    const maxAttempts = options?.maxAttempts ?? 180
+    const intervalMs = options?.intervalMs ?? 2000
+
+    for (let i = 0; i < maxAttempts; i += 1) {
+      const status = await vragApi.getCommandStatus(commandId)
+      if (status.status === 'completed' || status.status === 'failed' || status.status === 'canceled') {
+        return status
+      }
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+    }
+    return null
   },
 
   // List VRAG sessions
@@ -90,7 +119,7 @@ export const vragApi = {
     const params = new URLSearchParams()
     if (notebookId) params.append('notebook_id', notebookId)
     params.append('limit', limit.toString())
-    const response = await apiClient.get<{ sessions: Record<string, unknown>[] }>(`/vrag/sessions?${params}`)
+    const response = await apiClient.get<{ sessions: Record<string, unknown>[] }>(`/visual-rag/sessions?${params}`)
     // Transform backend field names to frontend type
     return response.data.sessions.map((s: Record<string, unknown>) => ({
       id: String(s.session_id ?? ''),
@@ -108,7 +137,7 @@ export const vragApi = {
       memory_graph: VRAGDAG | null
       evidence: Array<Record<string, unknown>>
       messages: VRAGSessionDetail['messages']
-    }>(`/vrag/sessions/${sessionId}`)
+    }>(`/visual-rag/sessions/${sessionId}`)
     const s = response.data.session as Record<string, unknown>
     const metadata = s.metadata && typeof s.metadata === 'object'
       ? s.metadata as VRAGSessionMetadata
@@ -130,13 +159,13 @@ export const vragApi = {
 
   // Get the DAG graph for a VRAG session
   getGraph: async (sessionId: string) => {
-    const response = await apiClient.get<VRAGDAG>(`/vrag/sessions/${sessionId}/graph`)
+    const response = await apiClient.get<VRAGDAG>(`/visual-rag/sessions/${sessionId}/graph`)
     return response.data
   },
 
   // Delete a VRAG session
   deleteSession: async (sessionId: string) => {
-    const response = await apiClient.delete<{ session_id: string }>(`/vrag/sessions/${sessionId}`)
+    const response = await apiClient.delete<{ session_id: string }>(`/visual-rag/sessions/${sessionId}`)
     return response.data
   }
 }

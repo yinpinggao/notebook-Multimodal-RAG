@@ -34,7 +34,6 @@ from api.routers import (
     transformations,
 )
 from api.routers import commands as commands_router
-from open_notebook.vrag.api import router as vrag_router
 from open_notebook.database.async_migrate import AsyncMigrationManager
 from open_notebook.exceptions import (
     AuthenticationError,
@@ -48,6 +47,11 @@ from open_notebook.exceptions import (
 )
 from open_notebook.seekdb import seekdb_client, seekdb_is_configured
 from open_notebook.utils.encryption import get_secret_from_env
+from open_notebook.visual_rag.api import (
+    asset_router as visual_asset_router,
+    legacy_router as vrag_legacy_router,
+    router as visual_rag_router,
+)
 
 # Import commands to register them in the API process
 try:
@@ -113,6 +117,17 @@ async def lifespan(app: FastAPI):
     if seekdb_is_configured():
         try:
             await seekdb_client.ensure_schema()
+            try:
+                from open_notebook.storage.visual_migration import (
+                    run_visual_rag_legacy_migration,
+                )
+
+                migration_summary = await run_visual_rag_legacy_migration()
+                logger.info(f"Visual RAG legacy migration summary: {migration_summary}")
+            except Exception as migration_error:
+                logger.warning(
+                    f"Visual RAG legacy migration skipped or partially failed: {migration_error}"
+                )
             seekdb_online = await seekdb_client.ping()
             if seekdb_online:
                 logger.info("SeekDB connectivity check succeeded")
@@ -294,7 +309,9 @@ app.include_router(chat.router, prefix="/api", tags=["chat"])
 app.include_router(source_chat.router, prefix="/api", tags=["source-chat"])
 app.include_router(credentials.router, prefix="/api", tags=["credentials"])
 app.include_router(languages.router, prefix="/api", tags=["languages"])
-app.include_router(vrag_router, prefix="/api", tags=["vrag"])
+app.include_router(visual_rag_router, prefix="/api", tags=["visual-rag"])
+app.include_router(vrag_legacy_router, prefix="/api", tags=["vrag"])
+app.include_router(visual_asset_router, prefix="/api", tags=["visual-assets"])
 
 
 @app.get("/")

@@ -9,7 +9,7 @@ This is a dual-project repository:
 | Directory | Description |
 |---|---|
 | `open-notebook/` | **Primary project** — Open-source AI research assistant (Google Notebook LM alternative). Next.js frontend + FastAPI backend + SeekDB database. |
-| `VRAG/` | **Reference implementation** — Visual RAG (VimRAG + VRAG-RL). Demo/research code, not part of the main project. |
+| `open-notebook/references/vrag-original/` | **Reference implementation** — Visual RAG (VimRAG + VRAG-RL). Demo/research code, not part of the main project. |
 
 **Most development work happens in `open-notebook/`**.
 
@@ -68,9 +68,9 @@ For detailed guidance, read `open-notebook/CLAUDE.md`. Key references:
 | `open-notebook/open_notebook/utils/CLAUDE.md` | Chunking, embedding, context building, encryption |
 | `open-notebook/open_notebook/podcasts/CLAUDE.md` | Podcast generation, speaker profiles |
 
-## VRAG Directory
+## VRAG Reference Directory
 
-`VRAG/` is a separate reference implementation of Visual RAG (VimRAG + VRAG-RL). It is NOT part of `open-notebook/`. The VRAG module within `open-notebook/open_notebook/vrag/` is the integrated version used by the main application.
+`open-notebook/references/vrag-original/` is a separate reference implementation of Visual RAG (VimRAG + VRAG-RL). It is NOT runtime code for `open-notebook/`. The canonical Visual RAG implementation used by the main application now lives under `open-notebook/open_notebook/visual_rag/`, with compatibility helpers in `open-notebook/open_notebook/vrag/`.
 
 ## Key Architectural Patterns
 

@@ -34,6 +34,7 @@ from open_notebook.domain.transformation import Transformation
 from open_notebook.exceptions import InvalidInputError
 from open_notebook.jobs import execute_command_sync, submit_command
 from open_notebook.seekdb import seekdb_business_store, use_seekdb_for_search
+from open_notebook.storage.visual_assets import visual_asset_store
 
 router = APIRouter()
 
@@ -230,6 +231,7 @@ async def get_sources(
                         f"Failed to load SeekDB embedding stats for source {row.get('id')}: {e}"
                     )
 
+            visual_fields = await _get_source_visual_fields(row.get("id"))
             response_list.append(
                 SourceListResponse(
                     id=row["id"],
@@ -253,6 +255,7 @@ async def get_sources(
                     command_id=command_id,
                     status=status,
                     processing_info=processing_info,
+                    **visual_fields,
                 )
             )
 
@@ -393,6 +396,7 @@ async def create_source(
                     command_id=command_id,
                     status="new",
                     processing_info={"async": True, "queued": True},
+                    **(await _get_source_visual_fields(source.id)),
                 )
 
             except Exception as e:
@@ -503,6 +507,7 @@ async def create_source(
                     created=str(processed_source.created),
                     updated=str(processed_source.updated),
                     # No command_id or status for sync processing (legacy behavior)
+                    **(await _get_source_visual_fields(processed_source.id)),
                 )
 
             except Exception as e:
@@ -590,12 +595,37 @@ def _is_source_file_available(source: Source) -> Optional[bool]:
 
 
 async def _get_source_index_stats(source: Source) -> tuple[int, int]:
-    if not use_seekdb_for_search():
-        embedded_chunks, page_count = await _get_source_index_stats(source)
-        return embedded_chunks, 0
-
     stats = await source.get_index_stats()
     return stats.get("chunk_count", 0), stats.get("page_count", 0)
+
+
+async def _get_source_visual_fields(source_id: Optional[str]) -> dict[str, Any]:
+    if not source_id:
+        return {
+            "visual_index_status": None,
+            "visual_asset_count": 0,
+            "visual_last_indexed_at": None,
+            "visual_index_command_id": None,
+        }
+
+    try:
+        summary = await visual_asset_store.source_index_summary(str(source_id))
+        return {
+            "visual_index_status": summary.get("visual_index_status"),
+            "visual_asset_count": int(summary.get("visual_asset_count") or 0),
+            "visual_last_indexed_at": summary.get("visual_last_indexed_at"),
+            "visual_index_command_id": summary.get("visual_index_command_id"),
+        }
+    except Exception as e:
+        logger.warning(
+            f"Failed to load visual index summary for source {source_id}: {e}"
+        )
+        return {
+            "visual_index_status": None,
+            "visual_asset_count": 0,
+            "visual_last_indexed_at": None,
+            "visual_index_command_id": None,
+        }
 
 
 @router.get("/sources/{source_id}", response_model=SourceResponse)
@@ -647,6 +677,7 @@ async def get_source(source_id: str):
             processing_info=processing_info,
             # Notebook associations
             notebooks=notebook_ids,
+            **(await _get_source_visual_fields(source.id or source_id)),
         )
     except HTTPException:
         raise
@@ -785,6 +816,7 @@ async def update_source(source_id: str, source_update: SourceUpdate):
             page_count=page_count,
             created=str(source.created),
             updated=str(source.updated),
+            **(await _get_source_visual_fields(source.id or source_id)),
         )
     except HTTPException:
         raise
@@ -900,6 +932,7 @@ async def retry_source_processing(source_id: str):
                 command_id=command_id,
                 status="queued",
                 processing_info={"retry": True, "queued": True},
+                **(await _get_source_visual_fields(source.id or source_id)),
             )
 
         except Exception as e:

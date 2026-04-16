@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { vragApi } from '@/lib/api/vrag'
 import { toast } from 'sonner'
@@ -46,6 +47,7 @@ export function IndexingDialog({
   sources,
 }: IndexingDialogProps) {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
 
   // Source selection state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -73,9 +75,26 @@ export function IndexingDialog({
     return { icon: File, label: 'File' }
   }
 
+  const isVisualIndexable = (source: SourceListResponse) => {
+    return Boolean(source.asset?.file_path?.toLowerCase().endsWith('.pdf'))
+  }
+
   // Get indexing status for a source
-  const getStatus = (sourceId: string): IndexingStatus => {
-    return indexStates[sourceId]?.status || 'idle'
+  const getStatus = (source: SourceListResponse): IndexingStatus => {
+    const localStatus = indexStates[source.id]?.status
+    if (localStatus) return localStatus
+
+    switch (source.visual_index_status) {
+      case 'queued':
+      case 'running':
+        return 'indexing'
+      case 'completed':
+        return 'indexed'
+      case 'failed':
+        return 'error'
+      default:
+        return 'idle'
+    }
   }
 
   // Get status badge variant
@@ -97,6 +116,9 @@ export function IndexingDialog({
 
   // Toggle source selection
   const toggleSource = (sourceId: string) => {
+    const source = sources.find((s) => s.id === sourceId)
+    if (source && !isVisualIndexable(source)) return
+
     setSelectedIds((prev) => {
       const next = new Set(prev)
       if (next.has(sourceId)) {
@@ -110,10 +132,11 @@ export function IndexingDialog({
 
   // Select all / deselect all
   const toggleSelectAll = () => {
-    if (selectedIds.size === sources.length) {
+    const indexableSources = sources.filter(isVisualIndexable)
+    if (selectedIds.size === indexableSources.length) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(sources.map((s) => s.id)))
+      setSelectedIds(new Set(indexableSources.map((s) => s.id)))
     }
   }
 
@@ -127,29 +150,29 @@ export function IndexingDialog({
       setIndexStates((prev) => ({ ...prev, [source.id]: state }))
 
       try {
-        const asset = source.asset || {}
-        const sourcePath = asset.file_path || asset.url || ''
-        const sourceType = asset.url ? 'url' : 'pdf'
+        const result = await vragApi.indexSource(source.id, '', 'pdf', true)
+        if (!result.command_id) {
+          throw new Error('Visual indexing command was not returned')
+        }
 
-        const result = await vragApi.indexSource(
-          source.id,
-          sourcePath,
-          sourceType,
-          true
-        )
+        toast.success(t.vrag?.index?.queued || 'Indexing queued', {
+          description: result.command_id,
+        })
 
-        const result_ = result.indexing_result
-        if (result_ && result_.errors > 0) {
+        const commandStatus = await vragApi.waitForCommand(result.command_id)
+        await queryClient.invalidateQueries({ queryKey: ['sources'] })
+
+        if (!commandStatus || commandStatus.status !== 'completed') {
           setIndexStates((prev) => ({
             ...prev,
             [source.id]: {
               id: source.id,
               status: 'error',
-              message: `${result_.indexed}/${result_.total} indexed, ${result_.errors} errors`,
+              message: commandStatus?.error_message || 'Visual indexing failed',
             },
           }))
           toast.error(t.vrag?.index?.indexError || `Indexing error for ${source.title || source.id}`, {
-            description: `${result_.indexed}/${result_.total} chunks indexed, ${result_.errors} errors`,
+            description: commandStatus?.error_message || result.command_id,
           })
         } else {
           setIndexStates((prev) => ({
@@ -157,7 +180,7 @@ export function IndexingDialog({
             [source.id]: { id: source.id, status: 'indexed' },
           }))
           toast.success(t.vrag?.index?.indexSuccess || `Indexing complete for ${source.title || source.id}`, {
-            description: `${result_?.indexed || 0}/${result_?.total || 0} chunks indexed`,
+            description: result.command_id,
           })
         }
       } catch (err) {
@@ -186,15 +209,24 @@ export function IndexingDialog({
 
       try {
         const result = await vragApi.rebuildIndex(source.id, true)
-        const result_ = result.rebuild_result
+        if (!result.command_id) {
+          throw new Error('Visual rebuild command was not returned')
+        }
 
-        if (result_ && result_.errors > 0) {
+        toast.success(t.vrag?.index?.queued || 'Indexing queued', {
+          description: result.command_id,
+        })
+
+        const commandStatus = await vragApi.waitForCommand(result.command_id)
+        await queryClient.invalidateQueries({ queryKey: ['sources'] })
+
+        if (!commandStatus || commandStatus.status !== 'completed') {
           setIndexStates((prev) => ({
             ...prev,
             [source.id]: {
               id: source.id,
               status: 'rebuild-error',
-              message: `${result_.rebuilt}/${result_.total} rebuilt, ${result_.errors} errors`,
+              message: commandStatus?.error_message || 'Visual rebuild failed',
             },
           }))
         } else {
@@ -203,7 +235,7 @@ export function IndexingDialog({
             [source.id]: { id: source.id, status: 'rebuilt' },
           }))
           toast.success(t.vrag?.index?.rebuildSuccess || `Rebuild complete for ${source.title || source.id}`, {
-            description: `${result_?.rebuilt || 0}/${result_?.total || 0} chunks rebuilt`,
+            description: result.command_id,
           })
         }
       } catch (err) {
@@ -253,7 +285,7 @@ export function IndexingDialog({
             {/* Select all */}
             <div className="flex items-center gap-2 pb-2 border-b">
               <Checkbox
-                checked={selectedIds.size === sources.length && sources.length > 0}
+                checked={selectedIds.size === sources.filter(isVisualIndexable).length && sources.some(isVisualIndexable)}
                 onCheckedChange={toggleSelectAll}
                 id="select-all"
               />
@@ -261,7 +293,7 @@ export function IndexingDialog({
                 htmlFor="select-all"
                 className="text-sm font-medium cursor-pointer"
               >
-                {t.vrag?.index?.selectAll || 'Select all'} ({sources.length})
+                {t.vrag?.index?.selectAll || 'Select all'} ({sources.filter(isVisualIndexable).length})
               </label>
             </div>
 
@@ -269,9 +301,10 @@ export function IndexingDialog({
             <ScrollArea className="max-h-[300px]">
               <div className="space-y-2 pr-4">
                 {sources.map((source) => {
-                  const status = getStatus(source.id)
+                  const status = getStatus(source)
                   const isSelected = selectedIds.has(source.id)
                   const { icon: Icon, label } = getSourceType(source)
+                  const disabled = !isVisualIndexable(source) || status === 'indexing' || status === 'rebuilding'
 
                   return (
                     <div
@@ -286,7 +319,7 @@ export function IndexingDialog({
                         checked={isSelected}
                         onCheckedChange={() => toggleSource(source.id)}
                         id={`source-${source.id}`}
-                        disabled={status === 'indexing' || status === 'rebuilding'}
+                        disabled={disabled}
                       />
                       <Icon className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                       <div className="flex-1 min-w-0">
@@ -296,7 +329,10 @@ export function IndexingDialog({
                         >
                           {source.title || (label === 'URL' ? source.asset?.url : source.id)}
                         </label>
-                        <span className="text-xs text-muted-foreground">{label}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {label}
+                          {source.visual_asset_count ? ` · ${source.visual_asset_count} images` : ''}
+                        </span>
                       </div>
                       {getStatusBadge(status)}
                     </div>

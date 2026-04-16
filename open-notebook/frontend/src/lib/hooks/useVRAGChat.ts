@@ -55,8 +55,10 @@ function extractEvidenceImages(evidence: VRAGSessionDetail['evidence']): VRAGIma
     for (const image of entry.images as Array<Record<string, unknown>>) {
       images.push({
         chunk_id: String(image.chunk_id || image.id || image.image_path || ''),
+        asset_id: typeof image.asset_id === 'string' ? image.asset_id : undefined,
         score: Number(image.score || 0),
         image_path: String(image.image_path || ''),
+        file_url: typeof image.file_url === 'string' ? image.file_url : undefined,
         image_base64: typeof image.image_base64 === 'string' ? image.image_base64 : undefined,
         page_no: Number(image.page_no || 0),
         source_id: String(image.source_id || ''),
@@ -89,8 +91,10 @@ function appendUniqueImages(
     const key = image.chunk_id || image.image_path
     byKey.set(key, {
       chunk_id: image.chunk_id || image.image_path,
+      asset_id: image.asset_id,
       score: image.score || 0,
       image_path: image.image_path,
+      file_url: image.file_url,
       page_no: image.page_no,
       source_id: '',
       summary: image.summary,
@@ -249,7 +253,7 @@ export function useVRAGChat(notebookId: string) {
               type: data.node_type as VRAGMemoryNode['type'],
               summary: data.summary,
               parent_ids: [],
-              images: (data.top_images || []).map((image) => image.image_path || ''),
+              images: (data.top_images || []).map((image) => image.file_url || image.image_path || ''),
               priority: 1.0,
               is_useful: true,
               key_insight: data.summary.slice(0, 200)

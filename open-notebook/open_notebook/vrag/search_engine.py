@@ -39,6 +39,8 @@ class VRAGSearchResult:
         source_id: Optional[str] = None,
         bbox: Optional[list[float]] = None,
         summary: Optional[str] = None,
+        asset_id: Optional[str] = None,
+        file_url: Optional[str] = None,
     ):
         self.chunk_id = chunk_id
         self.score = score
@@ -50,13 +52,17 @@ class VRAGSearchResult:
         self.source_id = source_id
         self.bbox = bbox
         self.summary = summary
+        self.asset_id = asset_id or chunk_id
+        self.file_url = file_url
 
     def to_dict(self) -> dict:
         return {
             "chunk_id": self.chunk_id,
+            "asset_id": self.asset_id,
             "score": self.score,
             "type": self.type,
             "image_path": self.image_path,
+            "file_url": self.file_url,
             "text": self.text,
             "page_no": self.page_no,
             "source_id": self.source_id,

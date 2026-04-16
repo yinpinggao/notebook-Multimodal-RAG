@@ -8,7 +8,8 @@ from open_notebook.database.repository import ensure_record_id
 from open_notebook.domain.notebook import Source
 from open_notebook.domain.transformation import Transformation
 from open_notebook.exceptions import ConfigurationError
-from open_notebook.jobs import CommandInput, CommandOutput, command
+from open_notebook.jobs import CommandInput, CommandOutput, command, submit_command
+from open_notebook.seekdb import multimodal_indexing_enabled
 
 try:
     from open_notebook.graphs.source import source_graph
@@ -113,6 +114,37 @@ async def process_source_command(
         )
 
         processed_source = result["source"]
+
+        if multimodal_indexing_enabled():
+            try:
+                import commands.visual_rag_commands  # noqa: F401
+
+                file_path = (
+                    processed_source.asset.file_path
+                    if processed_source.asset
+                    else None
+                )
+                if file_path and file_path.lower().endswith(".pdf"):
+                    command_id = submit_command(
+                        "open_notebook",
+                        "index_visual_source",
+                        {
+                            "source_id": str(processed_source.id),
+                            "regenerate": False,
+                            "generate_summaries": True,
+                        },
+                    )
+                    from open_notebook.storage.visual_assets import visual_asset_store
+
+                    await visual_asset_store.mark_source_index_status(
+                        str(processed_source.id),
+                        status="queued",
+                        command_id=str(command_id),
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to queue visual index for source {processed_source.id}: {e}"
+                )
 
         # 4. Gather processing results (notebook associations handled by source_graph)
         # Note: embedding is fire-and-forget (async job), so we can't query the

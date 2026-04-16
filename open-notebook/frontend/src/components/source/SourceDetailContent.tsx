@@ -290,17 +290,31 @@ export function SourceDetailContent({
     try {
       setIsIndexingVRAG(true)
       const result = await vragApi.rebuildIndex(sourceId, true)
-      const r = result.rebuild_result
-      if (r && r.errors > 0) {
-        toast.error(
-          `${r.rebuilt}/${r.total} images indexed, ${r.errors} errors`
-        )
-      } else {
-        toast.success(
-          t.vrag?.index?.indexSuccess || 'Images indexed successfully',
-          { description: `${r?.rebuilt || 0}/${r?.total || 0} images indexed` }
-        )
+      if (!result.command_id) {
+        throw new Error('Visual indexing command was not returned')
       }
+
+      toast.success(t.vrag?.index?.queued || 'Indexing queued', {
+        description: result.command_id,
+      })
+      setSource({
+        ...source,
+        visual_index_status: 'queued',
+        visual_index_command_id: result.command_id,
+      })
+
+      const commandStatus = await vragApi.waitForCommand(result.command_id)
+      if (!commandStatus || commandStatus.status !== 'completed') {
+        toast.error(t.vrag?.index?.indexError || 'Failed to index images', {
+          description: commandStatus?.error_message || result.command_id,
+        })
+      } else {
+        toast.success(t.vrag?.index?.indexSuccess || 'Images indexed successfully', {
+          description: result.command_id,
+        })
+      }
+      await fetchSource()
+      queryClient.invalidateQueries({ queryKey: ['sources'] })
     } catch (err) {
       console.error('Failed to index images for VRAG:', err)
       const msg = err instanceof Error ? err.message : String(err)
@@ -478,6 +492,17 @@ export function SourceDetailContent({
             <Badge variant="secondary" className="text-sm">
               {getSourceType()}
             </Badge>
+            {source.asset?.file_path?.toLowerCase().endsWith('.pdf') && (
+              <Badge variant="outline" className="text-xs">
+                {source.visual_index_status === 'completed'
+                  ? `${t.vrag?.index?.indexed || 'Indexed'} (${source.visual_asset_count || 0})`
+                  : source.visual_index_status === 'queued' || source.visual_index_status === 'running'
+                    ? (t.vrag?.index?.indexing || 'Indexing...')
+                    : source.visual_index_status === 'failed'
+                      ? (t.vrag?.index?.error || 'Error')
+                      : (t.vrag?.index?.notIndexed || 'Not indexed')}
+              </Badge>
+            )}
 
             {/* Chat with source button - only in modal */}
             {showChatButton && onChatClick && (
@@ -523,10 +548,10 @@ export function SourceDetailContent({
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       onClick={handleIndexVRAG}
-                      disabled={isIndexingVRAG}
+                      disabled={isIndexingVRAG || source.visual_index_status === 'queued' || source.visual_index_status === 'running'}
                     >
                       <Zap className="mr-2 h-4 w-4" />
-                      {isIndexingVRAG
+                      {isIndexingVRAG || source.visual_index_status === 'queued' || source.visual_index_status === 'running'
                         ? (t.vrag?.index?.indexing || 'Indexing...')
                         : (t.vrag?.index?.indexImages || 'Index Images for Visual Search')}
                     </DropdownMenuItem>

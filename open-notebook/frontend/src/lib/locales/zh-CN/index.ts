@@ -746,6 +746,8 @@ export const zhCN = {
       indexed: "已索引",
       notIndexed: "未索引",
       indexing: "索引中...",
+      queued: "索引任务已排队",
+      error: "错误",
       indexSuccess: "索引完成",
       indexError: "索引失败",
       rebuildSuccess: "重建完成",

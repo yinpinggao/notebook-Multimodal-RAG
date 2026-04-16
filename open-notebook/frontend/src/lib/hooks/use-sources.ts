@@ -33,6 +33,10 @@ function shouldPollSource(source?: Partial<SourceListResponse> & { status?: stri
     return true
   }
 
+  if (source.visual_index_status === 'queued' || source.visual_index_status === 'running') {
+    return true
+  }
+
   return false
 }
 

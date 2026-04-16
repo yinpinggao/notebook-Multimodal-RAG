@@ -1,16 +1,8 @@
-"""VRAG: Vision-perception RAG — Multimodal retrieval and visual reasoning for open-notebook.
+"""Shared VRAG primitives used by the canonical Visual RAG subsystem.
 
-Modules:
-    prompts: Prompt templates for VRAG agent
-    utils: Image processing, bbox, base64 utilities
-    search_engine: Multimodal search using OpenAI CLIP API
-    indexer: PDF image extraction and CLIP embedding generation
-    tools: search/bbox_crop/summarize/answer tools for the agent
-    memory: Multimodal Memory Graph management
-    agent: ReAct agent for visual reasoning
-    workflow: LangGraph VRAG workflow
-    checkpoint: DAG state persistence using SeekDB
-    api: FastAPI router for VRAG endpoints
+The runtime HTTP layer now lives in `open_notebook.visual_rag.api`.
+This package keeps the reusable agent/workflow/search/tooling pieces that the
+new Visual RAG module builds on top of.
 """
 
 from open_notebook.vrag.agent import VRAGAgent

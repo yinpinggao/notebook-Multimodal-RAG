@@ -371,6 +371,62 @@ class SeekDBClient:
                     KEY idx_session_type (session_id, state_type)
                 )
                 """,
+                """
+                CREATE TABLE IF NOT EXISTS ai_visual_assets (
+                    id VARCHAR(255) PRIMARY KEY,
+                    source_id VARCHAR(255) NOT NULL,
+                    page_id VARCHAR(255) NULL,
+                    legacy_id VARCHAR(255) NULL,
+                    asset_type VARCHAR(64) NOT NULL,
+                    media_type VARCHAR(128) NULL,
+                    page_no INT NULL,
+                    file_path TEXT NULL,
+                    summary LONGTEXT NULL,
+                    raw_text LONGTEXT NULL,
+                    bbox_json LONGTEXT NULL,
+                    embedding_json LONGTEXT NULL,
+                    metadata_json LONGTEXT NULL,
+                    index_status VARCHAR(64) NOT NULL DEFAULT 'completed',
+                    index_command_id VARCHAR(255) NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    KEY idx_ai_visual_assets_source (source_id),
+                    KEY idx_ai_visual_assets_page (source_id, page_no),
+                    KEY idx_ai_visual_assets_legacy (legacy_id),
+                    KEY idx_ai_visual_assets_status (source_id, index_status)
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS ai_visual_rag_sessions (
+                    session_id VARCHAR(255) PRIMARY KEY,
+                    notebook_id VARCHAR(255) NOT NULL,
+                    title TEXT NULL,
+                    last_question LONGTEXT NULL,
+                    current_answer LONGTEXT NULL,
+                    last_answer_preview TEXT NULL,
+                    is_complete BOOLEAN NOT NULL DEFAULT FALSE,
+                    total_steps INT NOT NULL DEFAULT 0,
+                    last_error LONGTEXT NULL,
+                    metadata_json LONGTEXT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    KEY idx_ai_visual_rag_sessions_notebook (notebook_id),
+                    KEY idx_ai_visual_rag_sessions_updated (updated_at)
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS ai_visual_rag_events (
+                    id VARCHAR(255) PRIMARY KEY,
+                    session_id VARCHAR(255) NOT NULL,
+                    event_type VARCHAR(64) NOT NULL,
+                    event_index INT NOT NULL DEFAULT 0,
+                    payload_json LONGTEXT NOT NULL,
+                    created_at DATETIME NOT NULL,
+                    KEY idx_ai_visual_rag_events_session (session_id),
+                    KEY idx_ai_visual_rag_events_type (session_id, event_type),
+                    KEY idx_ai_visual_rag_events_order (session_id, event_index)
+                )
+                """,
             ]
 
             optional_statements = [
@@ -378,6 +434,7 @@ class SeekDBClient:
                 "CREATE FULLTEXT INDEX idx_ai_source_pages_text ON ai_source_pages (combined_text, page_summary, filename)",
                 "CREATE FULLTEXT INDEX idx_ai_note_index_text ON ai_note_index (content, title)",
                 "CREATE FULLTEXT INDEX idx_ai_insight_index_text ON ai_insight_index (content, source_title, insight_type)",
+                "CREATE FULLTEXT INDEX idx_ai_visual_assets_text ON ai_visual_assets (summary, raw_text)",
             ]
 
             alter_statements = [

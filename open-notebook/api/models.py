@@ -374,6 +374,11 @@ class SourceResponse(BaseModel):
     command_id: Optional[str] = None
     status: Optional[str] = None
     processing_info: Optional[Dict] = None
+    # Visual RAG index status
+    visual_index_status: Optional[str] = None
+    visual_asset_count: int = 0
+    visual_last_indexed_at: Optional[str] = None
+    visual_index_command_id: Optional[str] = None
     # Notebook associations
     notebooks: Optional[List[str]] = None
 
@@ -394,6 +399,11 @@ class SourceListResponse(BaseModel):
     command_id: Optional[str] = None
     status: Optional[str] = None
     processing_info: Optional[Dict[str, Any]] = None
+    # Visual RAG index status
+    visual_index_status: Optional[str] = None
+    visual_asset_count: int = 0
+    visual_last_indexed_at: Optional[str] = None
+    visual_index_command_id: Optional[str] = None
 
 
 # Context API models

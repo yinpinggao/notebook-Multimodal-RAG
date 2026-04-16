@@ -22,6 +22,7 @@ from .seekdb_sync_commands import (
     sync_seekdb_source_pages,
 )
 from .source_commands import process_source_command
+from .visual_rag_commands import index_visual_source_command
 
 __all__ = [
     # Embedding commands
@@ -46,4 +47,5 @@ __all__ = [
     "resync_seekdb_note_scope",
     "delete_seekdb_entity",
     "backfill_seekdb_indexes",
+    "index_visual_source_command",
 ]

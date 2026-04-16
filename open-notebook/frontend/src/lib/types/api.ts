@@ -36,6 +36,10 @@ export interface SourceListResponse {
   command_id?: string
   status?: string
   processing_info?: Record<string, unknown>
+  visual_index_status?: 'not_indexed' | 'queued' | 'running' | 'completed' | 'failed' | string | null
+  visual_asset_count?: number
+  visual_last_indexed_at?: string | null
+  visual_index_command_id?: string | null
 }
 
 export interface SourceDetailResponse extends SourceListResponse {
@@ -306,6 +310,8 @@ export interface VRAGStreamEvent {
   // Image data for the current node (lightweight, from dag_update)
   top_images?: Array<{
     chunk_id?: string
+    asset_id?: string
+    file_url?: string
     image_path: string
     page_no: number
     score?: number
@@ -322,8 +328,10 @@ export interface VRAGSearchResult {
 
 export interface VRAGImageResult {
   chunk_id: string
+  asset_id?: string
   score: number
   image_path: string
+  file_url?: string
   image_base64?: string
   page_no: number
   source_id: string
@@ -341,6 +349,8 @@ export interface VRAGTextResult {
 
 export interface VRAGIndexResult {
   source_id: string
+  command_id?: string
+  status?: 'queued' | 'running' | 'completed' | 'failed' | string
   indexing_result?: {
     total: number
     indexed: number

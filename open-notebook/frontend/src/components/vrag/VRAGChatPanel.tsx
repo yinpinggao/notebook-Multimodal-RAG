@@ -25,6 +25,7 @@ import { useTranslation } from '@/lib/hooks/use-translation'
 import { DAGViewer } from './DAGViewer'
 import { ImageEvidencePanel } from './ImageEvidencePanel'
 import {
+  VRAGDAG,
   VRAGSession,
   VRAGImageResult
 } from '@/lib/types/api'
@@ -36,7 +37,7 @@ interface VRAGChatPanelProps {
   isStreaming: boolean
   isComplete: boolean
   error: string | null
-  dag: { nodes: any[]; edges: any[] }
+  dag: VRAGDAG
   currentAnswer: string
   sessions: VRAGSession[]
   currentSession?: VRAGSession
@@ -65,9 +66,7 @@ export function VRAGChatPanel({
   dag,
   currentAnswer,
   sessions,
-  currentSession,
   sessionId,
-  loadingSessions,
   onSendMessage,
   onCancelStreaming,
   onSwitchSession,
@@ -82,7 +81,7 @@ export function VRAGChatPanel({
   const chatInputId = useId()
   const [input, setInput] = useState('')
   const [maxSteps, setMaxSteps] = useState(10)
-  const [context, setContext] = useState('')
+  const context = ''
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll to bottom when new messages arrive

@@ -517,6 +517,18 @@ class Source(ObjectModel):
                 "Continuing with source deletion."
             )
 
+        if self.id:
+            try:
+                from open_notebook.storage.visual_assets import visual_asset_store
+
+                await visual_asset_store.delete_source_assets(str(self.id))
+                logger.debug(f"Deleted visual assets for source {self.id}")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete visual assets for source {self.id}: {e}. "
+                    "Continuing with source deletion."
+                )
+
         # Call parent delete to remove database record
         deleted = await super().delete()
         if use_seekdb_for_search() and self.id:

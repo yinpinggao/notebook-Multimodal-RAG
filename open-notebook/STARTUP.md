@@ -1,346 +1,201 @@
 # Open Notebook 启动指南
 
-本文档说明如何启动 Open Notebook 项目。项目使用 **SeekDB** 作为数据库，**Redis** 作为任务队列，**FastAPI** 作为后端 API，**Next.js** 作为前端界面。
+这份文档基于当前重构后的项目结构整理，适用于现在的一体化 `Open Notebook + Visual RAG`。
 
-## 快速启动（推荐）
+项目运行时由这几部分组成：
+- `SeekDB`：主数据库与检索存储
+- `Redis`：异步任务队列
+- `FastAPI`：后端 API
+- `Worker`：异步任务处理器
+- `Next.js`：前端界面
 
-使用 Makefile 一键启动所有服务：
+## 推荐启动方式
+
+在项目根目录执行：
 
 ```bash
-# 1. 创建环境配置文件
 cp .env.seekdb.example .env.seekdb
-
-# 2. 一键启动所有服务（SeekDB + Redis + API + Worker + Frontend）
 make seekdb-dev-up
 ```
 
-这会自动：
-- 启动 SeekDB 和 Redis Docker 容器
-- 等待 SeekDB 就绪
-- 启动 API 后端（端口 5055）
-- 启动后台 Worker（异步任务）
-- 启动 Next.js 前端（端口 3000）
-
 启动完成后访问：
-- **前端界面**: http://localhost:3000
-- **API 文档**: http://localhost:5055/docs
-- **API 健康检查**: http://localhost:5055/health
+- 前端：`http://localhost:3000`
+- API 文档：`http://localhost:5055/docs`
+- 健康检查：`http://localhost:5055/health`
 
-## 分步启动（手动控制）
+`make seekdb-dev-up` 会自动完成这些事情：
+- 启动 `SeekDB` 和 `Redis` 容器
+- 等待 `SeekDB` 就绪
+- 启动 `FastAPI` 后端
+- 启动 `Worker`
+- 启动 `Next.js` 前端
 
-如果需要更细粒度的控制，可以在不同终端中分别启动各服务：
+## 手动分步启动
 
-### 步骤 1：准备环境配置文件
+如果你想分别控制每个进程，可以按下面方式启动。
+
+### 1. 准备环境变量
 
 ```bash
 cp .env.seekdb.example .env.seekdb
 ```
 
-### 步骤 2：启动数据库和队列
+### 2. 启动 SeekDB 和 Redis
 
 ```bash
-# 使用 Docker Compose 启动 SeekDB 和 Redis
 make database-seekdb
-# 或等效命令：docker compose -f docker-compose.dev.yml -f docker-compose.seekdb.yml up -d seekdb redis
 ```
 
-等待 SeekDB 就绪（约 10-20 秒）。
+等价命令：
 
-### 步骤 3：启动 API 后端
+```bash
+docker compose -f docker-compose.dev.yml -f docker-compose.seekdb.yml up -d seekdb redis
+```
+
+### 3. 启动 API
+
+```bash
+uv run --env-file .env.seekdb run_api.py
+```
+
+也可以使用：
 
 ```bash
 make api
-# 或等效命令：uv run --env-file .env.seekdb run_api.py
 ```
 
-API 会在 http://127.0.0.1:5055 启动，支持热重载。
+默认地址：
+- API：`http://127.0.0.1:5055`
+- Docs：`http://127.0.0.1:5055/docs`
 
-### 步骤 4：启动后台 Worker（异步任务）
+### 4. 启动 Worker
+
+另开一个终端：
 
 ```bash
-# 在另一个终端中启动
-OPEN_NOTEBOOK_JOB_BACKEND=arq uv run open-notebook-worker
+OPEN_NOTEBOOK_JOB_BACKEND=arq uv run --env-file .env.seekdb open-notebook-worker
 ```
 
-Worker 处理异步任务：播客生成、内容向量化、洞察创建等。
-
-### 步骤 5：启动前端
+也可以用：
 
 ```bash
-# 在另一个终端中启动
-cd frontend && npm run dev
+make worker
 ```
 
-前端会在 http://localhost:3000 启动。
+### 5. 启动前端
 
-## 服务管理命令
+另开一个终端：
+
+```bash
+cd frontend
+npm run dev
+```
+
+前端默认地址：
+- `http://localhost:3000`
+
+## 常用管理命令
 
 | 命令 | 说明 |
 |------|------|
-| `make seekdb-dev-up` | 启动所有服务 |
-| `make seekdb-dev-stop` | 停止所有服务 |
-| `make seekdb-dev-status` | 查看各服务运行状态 |
-| `make seekdb-dev-logs` | 实时查看所有服务日志 |
-| `make worker` | 单独启动后台 Worker |
-| `make status` | 查看所有服务状态 |
+| `make seekdb-dev-up` | 启动整套开发环境 |
+| `make seekdb-dev-stop` | 停止整套开发环境 |
+| `make seekdb-dev-status` | 查看开发环境状态 |
+| `make seekdb-dev-logs` | 查看 API / Worker / Frontend 日志 |
+| `make database-seekdb` | 只启动 SeekDB 和 Redis |
+| `make api` | 只启动 API |
+| `make worker` | 只启动 Worker |
 
-### 后台 Worker 是什么？
+## Worker 负责什么
 
-后台 Worker（`open-notebook-worker`）是处理**异步任务**的后台进程，负责：
+`Worker` 不只是“可选项”，很多功能都依赖它：
+- source 异步处理
+- 文本向量化
+- insight 创建
+- podcast 生成
+- Visual RAG 图像索引 / 重建
 
-- 播客生成（文字转语音）
-- 内容向量化（文本嵌入）
-- VRAG 图像索引（PDF 图片提取和嵌入）
-- 洞察创建
+如果 `Worker` 没有运行，你会看到这些任务一直停留在“排队中”。
 
-**如果 Worker 未运行，以下功能会一直卡在"排队中"状态：**
-- 播客生成
-- 文本嵌入重建
-- VRAG 图像索引
-
-启动 Worker 的方式：
-```bash
-# 方式 1：Worker 随所有服务一起启动（推荐）
-make seekdb-dev-up
-
-# 方式 2：单独启动 Worker（在另一个终端）
-make worker
-# 或
-OPEN_NOTEBOOK_JOB_BACKEND=arq uv run open-notebook-worker
-
-# 方式 3：检查 Worker 是否在运行
-make status
-# 或
-pgrep -f "open-notebook-worker"
-```
-
-## 环境变量说明
-
-关键环境变量（见 `.env.seekdb.example`）：
-
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
-| `OPEN_NOTEBOOK_SEEKDB_DSN` | `mysql://root:SeekDBRoot123!@seekdb:2881/open_notebook_ai` | SeekDB 连接字符串 |
-| `OPEN_NOTEBOOK_AI_CONFIG_BACKEND` | `seekdb` | AI 配置存储后端 |
-| `OPEN_NOTEBOOK_SEARCH_BACKEND` | `seekdb` | 搜索后端 |
-| `OPEN_NOTEBOOK_JOB_BACKEND` | `arq` | 异步任务后端（使用 Redis） |
-| `OPEN_NOTEBOOK_REDIS_URL` | `redis://redis:6379/0` | Redis 连接地址 |
-| `OPEN_NOTEBOOK_ENCRYPTION_KEY` | `change-me-to-a-secret-string` | 凭证加密密钥（生产环境必须修改） |
-| `OPEN_NOTEBOOK_PASSWORD` | `open-notebook-change-me` | API 访问密码 |
-
-### 开发环境变量（可选覆盖）
-
-| 变量名 | 默认值 | 说明 |
-|--------|--------|------|
-| `API_HOST` | `127.0.0.1` | API 监听地址 |
-| `API_PORT` | `5055` | API 监听端口 |
-| `API_RELOAD` | `true` | 是否启用热重载 |
-
-## Docker 方式启动（不推荐开发使用）
-
-使用 Docker Compose 启动完整容器化版本：
+检查状态：
 
 ```bash
-# 启动所有容器（API + 前端）
-make dev
-
-# 或启动完整版本（包含更多配置）
-make full
+make seekdb-dev-status
 ```
 
-## 停止服务
+或：
 
-```bash
-# 停止所有服务（包括 Docker 容器）
-make stop-all
-
-# 或仅停止 SeekDB 开发栈
-make seekdb-dev-stop
-```
-
-## 验证服务状态
-
-```bash
-# 查看所有服务状态
-make status
-
-# 检查 API 健康状态
-curl http://localhost:5055/health
-
-# 检查 API 配置
-curl http://localhost:5055/api/config
-```
-
-## 常见问题
-
-### SeekDB 连接失败
-
-```bash
-# 确认容器正在运行
-docker ps | grep seekdb
-
-# 查看 SeekDB 日志
-docker compose logs seekdb
-
-# 重新启动
-make database-seekdb
-```
-
-### 端口被占用
-
-```bash
-# 查看端口占用
-lsof -i :5055   # API
-lsof -i :3000   # 前端
-lsof -i :2881   # SeekDB
-```
-
-### API 报错 401 Unauthorized
-
-确保请求头中包含密码认证：
-```
-Authorization: Bearer open-notebook-change-me
-```
-
-或修改 `.env.seekdb` 中的 `OPEN_NOTEBOOK_PASSWORD` 为你的密码。
-
-### 任务一直显示"排队中"不执行
-
-这说明**后台 Worker 没有运行**。Worker 负责处理所有异步任务（播客生成、向量化重建、VRAG 索引等）。
-
-检查 Worker 状态：
-```bash
-make status
-```
-
-如果没有运行，启动它：
-```bash
-make worker
-```
-
-任务提交后会在队列中等待，Worker 每秒轮询一次 Redis 队列。启动 Worker 后，排队的任务会立即开始执行。
-
-### 播客生成无响应
-
-确认后台 Worker 正在运行：
 ```bash
 pgrep -f "open-notebook-worker"
 ```
 
-如果未运行，重新启动：
-```bash
-OPEN_NOTEBOOK_JOB_BACKEND=arq uv run open-notebook-worker
-```
+## Visual RAG 的当前入口
 
-### 迁移数据库
+重构后，Visual RAG 已经是 notebook 内部功能页。
 
-API 启动时会自动运行数据库迁移。如果需要手动触发：
-```bash
-uv run --env-file .env.seekdb python -c "
-import asyncio
-from open_notebook.database.async_migrate import AsyncMigrationManager
-asyncio.run(AsyncMigrationManager().run_migration_up())
-"
-```
+主要入口：
+- `http://localhost:3000/notebooks/<notebook-id>/visual`
 
-## 架构概览
+兼容入口：
+- `http://localhost:3000/vrag`
 
-```
-┌─────────────────┐
-│  Next.js 前端    │  :3000
-│  (localhost)     │
-└────────┬────────┘
-         │ HTTP REST
-         ▼
-┌─────────────────┐
-│  FastAPI 后端    │  :5055
-│  (uvicorn)      │
-├────────┬────────┤
-│        │        │
-│        ▼        ▼
-│  ┌─────────┐  ┌─────────┐
-│  │ SeekDB  │  │  Redis  │
-│  │ (MySQL) │  │ (任务队) │
-│  │  :2881  │  │  :6379  │
-│  └─────────┘  └─────────┘
-│  ┌─────────┐
-│  │ Worker  │
-│  │ (arq)   │
-│  └─────────┘
-```
+说明：
+- `/vrag` 现在只是兼容页面，会跳转或先让你选择 notebook
+- 不再推荐使用旧的 `/vrag?id=...` 作为主入口
 
-- **SeekDB**: 数据持久化（Notebook、Source、Note、Credential 等）
-- **Redis**: 异步任务队列（播客生成、向量化等）
-- **Worker**: 后台任务处理器，轮询 Redis 队列
-- **API**: 协调所有操作，提供 REST 接口
+## Visual RAG 的当前 API
 
-## VRAG 多模态检索与推理
+当前 canonical API 为：
 
-Open Notebook 支持 **VRAG (Vision-perception RAG)** 功能，可以对 PDF/PPT 文档中的图像、图表、表格进行语义检索和视觉推理。
-
-### 什么是 VRAG？
-
-VRAG 是一个多模态 RAG 系统，能够：
-- 从文档中提取图像并生成 CLIP 向量嵌入
-- 通过自然语言检索相关图像和文本
-- 使用 ReAct Agent 进行多轮视觉推理（搜索 → bbox 裁剪 → 总结 → 回答）
-- 支持流式输出和 DAG 推理过程可视化
-
-### 前提条件
-
-使用 VRAG 前需要：
-1. **AI 模型配置**：在设置页面配置用于嵌入和推理的模型
-2. **上传文档**：先将 PDF 文件作为 Source 上传到 notebook
-
-### 前端访问
-
-VRAG 可以通过前端界面直接访问：
-
-1. 打开笔记本页面
-2. 点击左侧导航栏的 **Visual RAG** 菜单（或直接访问 `/vrag?id=你的notebook-id`）
-3. 在 VRAG 页面点击 **"Index Sources"** 按钮为文档建立图像索引
-4. 索引完成后就可以开始对话，询问关于文档中图像的问题
-
-### API 端点
-
-| 端点 | 方法 | 功能 |
+| 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/vrag/chat/stream` | POST | VRAG 流式对话（SSE） |
-| `/api/vrag/search` | POST | 直接多模态检索 |
-| `/api/vrag/index` | POST | 触发 Source 图像索引 |
-| `/api/vrag/bbox/crop` | POST | bbox 裁剪图像区域 |
-| `/api/vrag/sessions` | GET | 列出 VRAG 会话 |
-| `/api/vrag/sessions/{id}/graph` | GET | 获取 DAG 推理图状态 |
-| `/api/vrag/reindex` | POST | 重建 Source 的图像索引 |
+| `/api/visual-rag/search` | `POST` | 统一视觉检索 |
+| `/api/visual-rag/chat/stream` | `POST` | 视觉问答流式对话 |
+| `/api/visual-rag/index` | `POST` | 提交视觉索引任务 |
+| `/api/visual-rag/reindex` | `POST` | 重建某个 source 的视觉索引 |
+| `/api/visual-rag/sessions` | `GET` | 列出视觉会话 |
+| `/api/visual-rag/sessions/{session_id}` | `GET` | 读取会话详情 |
+| `/api/visual-rag/sessions/{session_id}/graph` | `GET` | 读取推理图 |
+| `/api/visual-rag/sessions/{session_id}` | `DELETE` | 删除会话 |
+| `/api/visual-assets/{asset_id}/file` | `GET` | 安全读取视觉图片资产 |
 
-### 使用流程
+兼容别名仍然保留：
+- `/api/vrag/*`
 
-> **认证说明**：API 默认开启密码认证（如果未设置 `OPEN_NOTEBOOK_PASSWORD` 则认证跳过，开发环境可直接访问）。生产环境需设置密码后，在请求头中附带认证：
-> ```
-> Authorization: Bearer your-password
-> ```
+但新接入、脚本和文档都应该优先使用：
+- `/api/visual-rag/*`
 
-**1. 索引文档图像**
+## Visual RAG 使用示例
+
+### 提交视觉索引任务
 
 ```bash
-curl -X POST http://localhost:5055/api/vrag/index \
+curl -X POST http://localhost:5055/api/visual-rag/index \
   -H "Content-Type: application/json" \
   -d '{
     "source_id": "your-source-id",
-    "source_path": "/path/to/document.pdf",
-    "source_type": "pdf",
     "generate_summaries": true,
     "dpi": 150
   }'
 ```
 
-**2. VRAG 对话（流式）**
+返回示例：
+
+```json
+{
+  "source_id": "your-source-id",
+  "command_id": "command:xxxx",
+  "status": "queued"
+}
+```
+
+### 发起视觉问答
 
 ```bash
-curl -X POST http://localhost:5055/api/vrag/chat/stream \
+curl -X POST http://localhost:5055/api/visual-rag/chat/stream \
   -H "Content-Type: application/json" \
   -d '{
-    "question": "图表中展示的增长趋势是什么?",
+    "question": "第 3 页的图表说明了什么？",
     "notebook_id": "your-notebook-id",
     "source_ids": ["your-source-id"],
     "max_steps": 10,
@@ -349,15 +204,10 @@ curl -X POST http://localhost:5055/api/vrag/chat/stream \
   -N
 ```
 
-返回 SSE 事件流：
-- `dag_update`：推理步骤更新（search/bbox_crop/summarize/answer）
-- `complete`：最终答案
-- `error`：错误信息
-
-**3. 直接多模态检索（不经过 Agent）**
+### 直接做视觉检索
 
 ```bash
-curl -X POST http://localhost:5055/api/vrag/search \
+curl -X POST http://localhost:5055/api/visual-rag/search \
   -H "Content-Type: application/json" \
   -d '{
     "query": "revenue chart",
@@ -367,60 +217,115 @@ curl -X POST http://localhost:5055/api/vrag/search \
   }'
 ```
 
-### VRAG Agent 工作原理
+## 认证说明
 
-```
-用户提问
-    │
-    ▼
-┌─────────────────┐
-│   Agent 决策     │  ← LLM 决定下一步 action
-│  (search/bbox/  │
-│   summarize/   │
-│   answer)       │
-└────────┬────────┘
-         │
-    ┌────┴────┐
-    ▼         ▼
-search    bbox_crop
-    │         │
-    ▼         ▼
-返回图像   裁剪区域
-    │         │
-    └────┬────┘
-         ▼
-┌─────────────────┐
-│  更新 Memory    │  ← DAG 记忆图累积视觉证据
-│     Graph       │
-└────────┬────────┘
-         ▼
-┌─────────────────┐
-│  生成最终答案    │  ← 综合所有视觉证据
-│  (带图像引用)   │
-└─────────────────┘
+如果你设置了 `OPEN_NOTEBOOK_PASSWORD`，请求 API 时需要带上：
+
+```http
+Authorization: Bearer your-password
 ```
 
-### 环境变量
+开发环境如果未设置密码，部分接口可以直接访问。
 
-VRAG 使用以下环境变量（通过 `.env.seekdb` 配置）：
+## 关键环境变量
+
+常用变量见 `.env.seekdb.example`，这里列最关键的几项：
 
 | 变量名 | 说明 |
 |--------|------|
-| `OPENAI_API_KEY` | OpenAI API Key（用于 CLIP 嵌入和 GPT-4o） |
+| `OPEN_NOTEBOOK_SEEKDB_DSN` | SeekDB 连接串 |
+| `OPEN_NOTEBOOK_AI_CONFIG_BACKEND` | AI 配置后端，默认 `seekdb` |
+| `OPEN_NOTEBOOK_SEARCH_BACKEND` | 搜索后端，默认 `seekdb` |
+| `OPEN_NOTEBOOK_JOB_BACKEND` | 异步任务后端，默认 `arq` |
+| `OPEN_NOTEBOOK_REDIS_URL` | Redis 地址 |
+| `OPEN_NOTEBOOK_PASSWORD` | API 密码 |
+| `OPEN_NOTEBOOK_ENCRYPTION_KEY` | 凭证加密密钥 |
 
-如果没有设置，会使用 open-notebook 内部存储的 API Key（通过前端设置）。
+## 当前目录结构说明
 
-### 相关文件
+这次重构后，和 Visual RAG 相关的目录应该这样理解：
+- `open_notebook/visual_rag/`：当前运行中的 canonical Visual RAG HTTP/API 与检索索引模块
+- `open_notebook/storage/`：视觉资产、视觉会话、迁移逻辑
+- `open_notebook/vrag/`：仍保留的共享 agent / workflow / search / tools 逻辑
+- `references/vrag-original/`：原始 VRAG 参考代码，仅供查阅，不参与主应用运行
 
-- `open_notebook/vrag/` — VRAG 核心模块
-- `open_notebook/vrag/api.py` — FastAPI 路由
-- `open_notebook/vrag/agent.py` — ReAct Agent
-- `open_notebook/vrag/search_engine.py` — 多模态检索引擎
-- `open_notebook/vrag/indexer.py` — PDF 图像索引器
+## 常见问题
 
-## 更多资源
+### 1. `SeekDB` 连不上
 
-- [开发文档](docs/7-DEVELOPMENT/quick-start.md) — 开发环境详细配置
-- [架构文档](docs/7-DEVELOPMENT/architecture.md) — 系统架构详解
-- [配置指南](docs/5-CONFIGURATION/index.md) — 环境变量完整说明
-- [故障排除](docs/6-TROUBLESHOOTING/index.md) — 常见问题解答
+```bash
+docker ps | grep -E "seekdb|redis"
+docker compose -f docker-compose.dev.yml -f docker-compose.seekdb.yml logs seekdb
+```
+
+如果还不行，重启：
+
+```bash
+make seekdb-dev-stop
+make seekdb-dev-up
+```
+
+### 2. 任务一直排队不执行
+
+大概率是 `Worker` 没启动。
+
+启动它：
+
+```bash
+make worker
+```
+
+### 3. 前端打不开
+
+检查 3000 端口：
+
+```bash
+lsof -i :3000
+```
+
+前端日志：
+
+```bash
+tail -f .logs/seekdb-dev/frontend.log
+```
+
+### 4. API 打不开
+
+检查 5055 端口：
+
+```bash
+lsof -i :5055
+```
+
+API 日志：
+
+```bash
+tail -f .logs/seekdb-dev/api.log
+```
+
+### 5. Visual RAG 没结果
+
+按这个顺序检查：
+- source 是否已经处理完成
+- source 是否是 PDF
+- worker 是否正在运行
+- 该 source 是否已经提交过 visual index
+- 模型配置里是否至少有可用 chat / vision / embedding 配置
+
+## 推荐的开发调试顺序
+
+平时最省事的流程是：
+
+```bash
+cp .env.seekdb.example .env.seekdb
+make seekdb-dev-up
+make seekdb-dev-status
+```
+
+然后在浏览器里完成：
+1. 创建 notebook
+2. 上传 PDF source
+3. 等 source 处理完成
+4. 打开 `/notebooks/<id>/visual`
+5. 提交视觉索引
+6. 开始视觉问答

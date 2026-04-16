@@ -135,8 +135,10 @@ class VRAGTools:
             if r.type == "image":
                 img_dict = {
                     "chunk_id": r.chunk_id,
+                    "asset_id": getattr(r, "asset_id", r.chunk_id),
                     "score": r.score,
                     "image_path": r.image_path,
+                    "file_url": getattr(r, "file_url", None),
                     "image_base64": r.image_base64,
                     "page_no": r.page_no,
                     "source_id": r.source_id,
