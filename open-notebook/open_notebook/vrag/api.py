@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Any, AsyncIterator, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -68,10 +69,101 @@ class VRAGBBoxCropRequest(BaseModel):
     describe: bool = Field(default=True)
 
 
+def _embedding_model_name(embedding_model: Any) -> str:
+    return str(getattr(embedding_model, "model_name", "") or "").lower()
+
+
+def _supports_multimodal_embedding_model(embedding_model: Any) -> bool:
+    return "clip" in _embedding_model_name(embedding_model)
+
+
+def _default_session_title(question: str) -> str:
+    normalized = " ".join((question or "").strip().split())
+    if not normalized:
+        return "VRAG Chat"
+    return normalized[:80]
+
+
+def _make_message(message_type: str, content: str, index: int) -> dict[str, str]:
+    prefix = "ai" if message_type == "ai" else "human"
+    return {
+        "id": f"{prefix}-{index}",
+        "type": message_type,
+        "content": content,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+
+def _build_session_metadata(
+    question: str,
+    *,
+    title: Optional[str] = None,
+    is_complete: bool,
+    total_steps: int,
+    answer: str = "",
+    error: Optional[str] = None,
+) -> dict[str, Any]:
+    return {
+        "title": title or _default_session_title(question),
+        "last_question": question,
+        "current_answer": answer,
+        "last_answer_preview": answer[:200] if answer else "",
+        "is_complete": is_complete,
+        "total_steps": total_steps,
+        "last_error": error,
+    }
+
+
+def _extract_session_title(session: Optional[dict[str, Any]], question: str) -> str:
+    metadata = session.get("metadata") if session else None
+    if isinstance(metadata, dict) and metadata.get("title"):
+        return str(metadata["title"])
+    return _default_session_title(question)
+
+
+async def _build_vrag_components(
+    *,
+    include_image_base64: bool,
+    image_top_k: int = 5,
+):
+    from open_notebook.ai.models import model_manager
+    from open_notebook.ai.provision import provision_langchain_model
+    from open_notebook.vrag.search_engine import VRAGSearchEngine
+    from open_notebook.vrag.tools import VRAGTools
+
+    embedding_model = await model_manager.get_default_model("embedding")
+    llm = await provision_langchain_model(content="", model_id=None, default_type="chat")
+
+    if _supports_multimodal_embedding_model(embedding_model):
+        embed_text_fn = None
+        embed_image_fn = None
+    else:
+        embed_text_fn = embed_text
+        embed_image_fn = embed_image
+
+    search_engine = VRAGSearchEngine(
+        retrieval_service=ai_retrieval_service,
+        embedding_dim=768,
+        default_top_k=image_top_k,
+        embed_text_fn=embed_text_fn,
+        embed_image_fn=embed_image_fn,
+        embedding_model=embedding_model,
+    )
+
+    tools = VRAGTools(
+        search_engine=search_engine,
+        llm_client=llm,
+        include_image_base64=include_image_base64,
+    )
+
+    return embedding_model, llm, tools
+
+
 # --- Streaming helpers ---
 
 async def stream_vrag_events(
     question: str,
+    notebook_id: str,
     source_ids: Optional[list[str]],
     context: str,
     max_steps: int,
@@ -86,11 +178,33 @@ async def stream_vrag_events(
     from open_notebook.vrag.memory import MultimodalMemoryGraph
     from open_notebook.vrag.workflow import create_vrag_graph, create_vrag_workflow
 
+    session = checkpoint_saver.load_session(session_id)
+    session_title = _extract_session_title(session, question)
     memory_graph = checkpoint_saver.load_memory_graph(session_id)
     if memory_graph is None:
         memory_graph = MultimodalMemoryGraph()
 
     evidence = checkpoint_saver.load_collected_evidence(session_id)
+    existing_messages = checkpoint_saver.load_messages(session_id)
+    user_message = _make_message("human", question, len(existing_messages) + 1)
+    persisted_messages = existing_messages + [user_message]
+
+    checkpoint_saver.save_session(
+        session_id,
+        notebook_id,
+        metadata=_build_session_metadata(
+            question,
+            title=session_title,
+            is_complete=False,
+            total_steps=len(memory_graph.order),
+        ),
+    )
+    checkpoint_saver.checkpoint_state(
+        session_id=session_id,
+        memory_graph=memory_graph,
+        evidence=evidence,
+        messages=persisted_messages,
+    )
 
     _, create_initial_state = create_vrag_workflow(tools, max_steps=max_steps)
     initial_state = create_initial_state(
@@ -100,6 +214,8 @@ async def stream_vrag_events(
     )
     initial_state.memory_graph = memory_graph
     initial_state.collected_evidence = evidence
+    final_answer = ""
+    stream_error: Optional[str] = None
 
     graph = create_vrag_graph(tools)
 
@@ -110,17 +226,46 @@ async def stream_vrag_events(
                     for update in node_output["dag_updates"]:
                         yield f"data: {json.dumps({'type': 'dag_update', 'node': node_name, **update})}\n\n"
                 if node_output.get("is_complete"):
-                    yield f"data: {json.dumps({'type': 'complete', 'answer': node_output.get('final_answer', '')})}\n\n"
+                    final_answer = node_output.get("final_answer", "") or final_answer
+                    yield f"data: {json.dumps({'type': 'complete', 'answer': final_answer})}\n\n"
                 if node_output.get("error"):
-                    yield f"data: {json.dumps({'type': 'error', 'error': node_output['error']})}\n\n"
+                    stream_error = node_output["error"]
+                    yield f"data: {json.dumps({'type': 'error', 'error': stream_error})}\n\n"
 
+        final_messages = list(persisted_messages)
+        if final_answer:
+            final_messages.append(_make_message("ai", final_answer, len(final_messages) + 1))
         checkpoint_saver.checkpoint_state(
             session_id=session_id,
             memory_graph=initial_state.memory_graph,
             evidence=initial_state.collected_evidence,
+            messages=final_messages,
+        )
+        checkpoint_saver.save_session(
+            session_id,
+            notebook_id,
+            metadata=_build_session_metadata(
+                question,
+                title=session_title,
+                is_complete=stream_error is None and bool(final_answer),
+                total_steps=len(initial_state.memory_graph.order),
+                answer=final_answer,
+                error=stream_error,
+            ),
         )
     except Exception as e:
         logger.error(f"VRAG streaming failed: {e}")
+        checkpoint_saver.save_session(
+            session_id,
+            notebook_id,
+            metadata=_build_session_metadata(
+                question,
+                title=session_title,
+                is_complete=False,
+                total_steps=len(initial_state.memory_graph.order),
+                error=str(e),
+            ),
+        )
         yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
 
 
@@ -136,45 +281,35 @@ async def vrag_chat_stream(request: VRAGChatRequest):
     """
     from fastapi.responses import StreamingResponse
 
-    from open_notebook.ai.models import model_manager
-    from open_notebook.ai.provision import provision_langchain_model
     from open_notebook.vrag.checkpoint import SeekDBSaver
-    from open_notebook.vrag.search_engine import VRAGSearchEngine
-    from open_notebook.vrag.tools import VRAGTools
 
-    # Get embedding model via model_manager (supports domestic Chinese models)
-    embedding_model = await model_manager.get_default_model("embedding")
+    embedding_model, llm, tools = await _build_vrag_components(
+        include_image_base64=True,
+        image_top_k=5,
+    )
     logger.info(f"VRAG embedding model: {embedding_model}")
-
-    search_engine = VRAGSearchEngine(
-        retrieval_service=ai_retrieval_service,
-        embedding_dim=768,
-        default_top_k=5,
-        # Legacy OpenAI CLIP functions (used if embedding_model is not available)
-        embed_text_fn=embed_text,
-        embed_image_fn=embed_image,
-        # Domestic embedding model via Esperanto (preferred)
-        embedding_model=embedding_model,
-    )
-    logger.info(f"VRAG search engine created with embedding_model: {embedding_model}")
-
-    llm = await provision_langchain_model(content="", model_id=None, default_type="chat")
     logger.info(f"VRAG LLM model: {llm}")
-
-    tools = VRAGTools(
-        search_engine=search_engine,
-        llm_client=llm,
-        include_image_base64=False,
-    )
 
     checkpoint_saver = SeekDBSaver(seekdb_client)
     session_id = request.session_id or f"vrag_{uuid.uuid4().hex[:12]}"
-    checkpoint_saver.save_session(session_id, request.notebook_id)
+    existing_session = checkpoint_saver.load_session(session_id) if request.session_id else None
+    session_title = _extract_session_title(existing_session, request.question)
+    checkpoint_saver.save_session(
+        session_id,
+        request.notebook_id,
+        metadata=_build_session_metadata(
+            request.question,
+            title=session_title,
+            is_complete=False,
+            total_steps=0,
+        ),
+    )
 
     if request.stream:
         return StreamingResponse(
             stream_vrag_events(
                 question=request.question,
+                notebook_id=request.notebook_id,
                 source_ids=request.source_ids,
                 context=request.context,
                 max_steps=request.max_steps,
@@ -189,19 +324,40 @@ async def vrag_chat_stream(request: VRAGChatRequest):
     # Non-streaming path
     from open_notebook.vrag.agent import VRAGAgent
 
+    existing_memory_graph = checkpoint_saver.load_memory_graph(session_id)
+    existing_evidence = checkpoint_saver.load_collected_evidence(session_id)
+    existing_messages = checkpoint_saver.load_messages(session_id)
+
     agent = VRAGAgent(
         tools=tools,
         llm_client=llm,
         max_steps=request.max_steps,
     )
-    result = agent.run(
+    result = await agent.run(
         question=request.question,
         source_ids=request.source_ids,
+        context=request.context,
+        memory_graph=existing_memory_graph,
+        collected_evidence=existing_evidence,
+        messages=existing_messages,
     )
     checkpoint_saver.checkpoint_state(
         session_id=session_id,
         memory_graph=result.memory_graph,
         evidence=result.collected_evidence,
+        messages=result.messages,
+    )
+    checkpoint_saver.save_session(
+        session_id,
+        request.notebook_id,
+        metadata=_build_session_metadata(
+            request.question,
+            title=session_title,
+            is_complete=result.is_complete and not result.error,
+            total_steps=len(result.actions),
+            answer=result.current_answer,
+            error=result.error,
+        ),
     )
     return {
         "session_id": session_id,
@@ -220,31 +376,9 @@ async def vrag_search(request: VRAGSearchRequest):
     Uses domestic Chinese embedding models (tongyi, zhipu, wenxin, etc.) via Esperanto.
     Falls back to OpenAI CLIP if no domestic models are configured.
     """
-    from open_notebook.ai.models import model_manager
-    from open_notebook.ai.provision import provision_langchain_model
-    from open_notebook.vrag.search_engine import VRAGSearchEngine
-    from open_notebook.vrag.tools import VRAGTools
-
-    # Get embedding model via model_manager (supports domestic Chinese models)
-    embedding_model = await model_manager.get_default_model("embedding")
-
-    search_engine = VRAGSearchEngine(
-        retrieval_service=ai_retrieval_service,
-        embedding_dim=768,
-        default_top_k=request.image_top_k,
-        # Legacy OpenAI CLIP functions (used if embedding_model is not available)
-        embed_text_fn=embed_text,
-        embed_image_fn=embed_image,
-        # Domestic embedding model via Esperanto (preferred)
-        embedding_model=embedding_model,
-    )
-
-    llm = await provision_langchain_model(content="", model_id=None, default_type="chat")
-
-    tools = VRAGTools(
-        search_engine=search_engine,
-        llm_client=llm,
+    _, _, tools = await _build_vrag_components(
         include_image_base64=request.include_image_base64,
+        image_top_k=request.image_top_k,
     )
 
     result = await tools.search(
@@ -270,13 +404,13 @@ async def vrag_index(request: VRAGIndexRequest):
     # Get embedding and vision models via model_manager (supports domestic Chinese models)
     embedding_model = await model_manager.get_default_model("embedding")
     vision_model = await model_manager.get_default_model("vision")
+    use_legacy_clip = not _supports_multimodal_embedding_model(embedding_model)
 
     indexer = VRAGIndexer(
         retrieval_service=ai_retrieval_service,
         seekdb_client=seekdb_client,
-        # Legacy OpenAI CLIP functions (used if embedding_model is not available)
-        embed_text_fn=embed_text,
-        embed_image_fn=embed_image,
+        embed_text_fn=embed_text if use_legacy_clip else None,
+        embed_image_fn=embed_image if use_legacy_clip else None,
         # Domestic models via Esperanto (preferred)
         embedding_model=embedding_model,
         vision_model=vision_model,
@@ -303,28 +437,9 @@ async def vrag_bbox_crop(request: VRAGBBoxCropRequest):
     Uses domestic vision models for describing the cropped region.
     Falls back to OpenAI GPT-4o if no domestic models are configured.
     """
-    from open_notebook.ai.models import model_manager
-    from open_notebook.ai.provision import provision_langchain_model
-    from open_notebook.vrag.search_engine import VRAGSearchEngine
-    from open_notebook.vrag.tools import VRAGTools
-
-    # Get embedding model via model_manager (supports domestic Chinese models)
-    embedding_model = await model_manager.get_default_model("embedding")
-
-    search_engine = VRAGSearchEngine(
-        retrieval_service=ai_retrieval_service,
-        # Legacy OpenAI CLIP functions (used if embedding_model is not available)
-        embed_text_fn=embed_text,
-        embed_image_fn=embed_image,
-        # Domestic embedding model via Esperanto (preferred)
-        embedding_model=embedding_model,
-    )
-
-    llm = await provision_langchain_model(content="", model_id=None, default_type="chat")
-
-    tools = VRAGTools(
-        search_engine=search_engine,
-        llm_client=llm,
+    _, _, tools = await _build_vrag_components(
+        include_image_base64=False,
+        image_top_k=5,
     )
 
     result = tools.bbox_crop(
@@ -408,13 +523,13 @@ async def vrag_rebuild_index(request: VRAGIndexRequest):
     # Get embedding and vision models via model_manager (supports domestic Chinese models)
     embedding_model = await model_manager.get_default_model("embedding")
     vision_model = await model_manager.get_default_model("vision")
+    use_legacy_clip = not _supports_multimodal_embedding_model(embedding_model)
 
     indexer = VRAGIndexer(
         retrieval_service=ai_retrieval_service,
         seekdb_client=seekdb_client,
-        # Legacy OpenAI CLIP functions (used if embedding_model is not available)
-        embed_text_fn=embed_text,
-        embed_image_fn=embed_image,
+        embed_text_fn=embed_text if use_legacy_clip else None,
+        embed_image_fn=embed_image if use_legacy_clip else None,
         # Domestic models via Esperanto (preferred)
         embedding_model=embedding_model,
         vision_model=vision_model,

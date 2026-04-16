@@ -15,7 +15,6 @@ import {
   GitBranch,
   ImageIcon,
   MessageSquare,
-  Clock,
   Trash2,
   RotateCcw,
   Network
@@ -26,10 +25,10 @@ import { useTranslation } from '@/lib/hooks/use-translation'
 import { DAGViewer } from './DAGViewer'
 import { ImageEvidencePanel } from './ImageEvidencePanel'
 import {
-  VRAGMessage,
   VRAGSession,
   VRAGImageResult
 } from '@/lib/types/api'
+import { VRAGMessage } from '@/lib/hooks/useVRAGChat'
 
 interface VRAGChatPanelProps {
   // Chat state from hook
@@ -53,6 +52,7 @@ interface VRAGChatPanelProps {
 
   // Optional data
   searchResults?: VRAGImageResult[]
+  getEvidenceImages?: () => VRAGImageResult[]
   sourceIds?: string[]
   className?: string
 }
@@ -74,6 +74,7 @@ export function VRAGChatPanel({
   onDeleteSession,
   onResetConversation,
   searchResults = [],
+  getEvidenceImages = () => [],
   sourceIds = [],
   className = ''
 }: VRAGChatPanelProps) {
@@ -182,14 +183,37 @@ export function VRAGChatPanel({
             <ScrollArea className="flex-1 min-h-0 px-4">
               <div className="space-y-4 py-4">
                 {messages.length === 0 ? (
-                  <div className="text-center text-muted-foreground py-8">
-                    <Network className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p className="text-sm">
-                      {t.vrag?.startConversation || 'Ask questions about visual content in your documents'}
+                  <div className="text-center text-muted-foreground py-12">
+                    <div className="relative mx-auto mb-5 w-20 h-20">
+                      <div className="absolute inset-0 rounded-full bg-blue-100 dark:bg-blue-900/40 animate-pulse" />
+                      <div className="relative flex items-center justify-center h-full">
+                        <Network className="h-10 w-10 text-blue-500 dark:text-blue-400" />
+                      </div>
+                    </div>
+                    <p className="text-sm font-medium mb-1.5">
+                      {t.vrag?.startConversation || 'Ask questions about visual content'}
                     </p>
-                    <p className="text-xs mt-2">
-                      {t.vrag?.exampleQuestions || 'Try: "What charts are in this document?" or "Describe the diagram on page 5"'}
+                    <p className="text-xs text-muted-foreground/70 mb-5 max-w-xs mx-auto leading-relaxed">
+                      {t.vrag?.exampleQuestions || 'Explore charts, diagrams, and images in your documents'}
                     </p>
+                    <div className="flex flex-wrap justify-center gap-2 max-w-sm mx-auto">
+                      {[
+                        'What charts are in this document?',
+                        'Describe the diagrams on page 5',
+                        'Find all images and their context',
+                        'What visual elements support the main argument?',
+                      ].map((q, i) => (
+                        <button
+                          key={i}
+                          onClick={() => {
+                            setInput(q)
+                          }}
+                          className="text-[11px] px-3 py-1.5 rounded-full border border-border hover:border-primary/50 hover:bg-primary/5 transition-colors text-left text-muted-foreground hover:text-foreground"
+                        >
+                          {q}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ) : (
                   messages.map((message) => (
@@ -238,11 +262,20 @@ export function VRAGChatPanel({
                   <div className="flex gap-3 justify-start">
                     <div className="flex-shrink-0">
                       <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
-                        <Bot className="h-4 w-4" />
+                        <Bot className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                       </div>
                     </div>
-                    <div className="rounded-lg px-4 py-2 bg-muted">
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                    <div className="flex flex-col gap-2 max-w-[80%]">
+                      <div className="rounded-lg px-4 py-2 bg-muted">
+                        {currentAnswer ? (
+                          <VRAGAIMessage content={currentAnswer} />
+                        ) : (
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            {t.vrag?.reasoning || 'Reasoning...'}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -304,34 +337,34 @@ export function VRAGChatPanel({
           </div>
 
           {/* Right: DAG + Evidence Panel */}
-          <div className="w-80 flex-shrink-0 hidden md:flex flex-col">
+          <div className="w-72 xl:w-80 flex-shrink-0 hidden md:flex flex-col border-l bg-card/30">
             <Tabs defaultValue="dag" className="flex-1 flex flex-col">
-              <TabsList className="w-full justify-start rounded-none border-b px-2 h-9">
-                <TabsTrigger value="dag" className="text-xs gap-1 h-7">
+              <TabsList className="w-full justify-start rounded-none border-b border-border/50 px-2 h-10 bg-transparent">
+                <TabsTrigger value="dag" className="text-xs gap-1.5 h-8 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground">
                   <GitBranch className="h-3 w-3" />
                   {t.vrag?.dag || 'DAG'}
                 </TabsTrigger>
-                <TabsTrigger value="images" className="text-xs gap-1 h-7">
+                <TabsTrigger value="images" className="text-xs gap-1.5 h-8 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground">
                   <ImageIcon className="h-3 w-3" />
                   {t.vrag?.images || 'Images'}
                 </TabsTrigger>
-                <TabsTrigger value="messages" className="text-xs gap-1 h-7">
+                <TabsTrigger value="messages" className="text-xs gap-1.5 h-8 data-[state=active]:bg-accent data-[state=active]:text-accent-foreground">
                   <MessageSquare className="h-3 w-3" />
                   {t.vrag?.messages || 'Msgs'}
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="dag" className="flex-1 min-h-0 m-0 p-2">
+              <TabsContent value="dag" className="flex-1 min-h-0 m-0">
                 <DAGViewer
                   dag={dag}
                   className="h-full"
                 />
               </TabsContent>
 
-              <TabsContent value="images" className="flex-1 min-h-0 m-0 p-2">
+              <TabsContent value="images" className="flex-1 min-h-0 m-0">
                 <ImageEvidencePanel
                   dag={dag}
-                  searchResults={searchResults}
+                  searchResults={getEvidenceImages()}
                   className="h-full"
                 />
               </TabsContent>
@@ -339,29 +372,35 @@ export function VRAGChatPanel({
               <TabsContent value="messages" className="flex-1 min-h-0 m-0 p-2 overflow-auto">
                 <div className="space-y-2">
                   {dag.nodes.length === 0 ? (
-                    <p className="text-xs text-muted-foreground text-center py-4">
-                      {t.vrag?.noMessages || 'No reasoning steps yet'}
-                    </p>
+                    <div className="flex flex-col items-center justify-center py-8 text-center">
+                      <MessageSquare className="h-8 w-8 text-muted-foreground/30 mb-2" />
+                      <p className="text-xs text-muted-foreground/60">
+                        {t.vrag?.noMessages || 'No reasoning steps yet'}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground/40 mt-1">
+                        Ask a question to see reasoning steps
+                      </p>
+                    </div>
                   ) : (
                     dag.nodes.map((node) => (
                       <div
                         key={node.id}
-                        className="border rounded-lg p-2"
+                        className="border border-border/60 rounded-lg p-2.5 bg-card hover:border-border transition-colors"
                       >
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs font-medium capitalize">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
                             {node.type?.replace('_', ' ') || 'node'}
                           </span>
                           {node.priority > 0 && (
                             <Badge
                               variant="outline"
-                              className="text-[9px] h-4 px-1"
+                              className="text-[9px] h-4 px-1 font-medium"
                             >
                               {(node.priority * 100).toFixed(0)}%
                             </Badge>
                           )}
                         </div>
-                        <p className="text-[10px] text-muted-foreground line-clamp-3">
+                        <p className="text-[11px] text-foreground/80 leading-relaxed line-clamp-3">
                           {node.summary || node.key_insight || 'No summary'}
                         </p>
                       </div>

@@ -36,41 +36,6 @@ class SeekDBSaver:
         """
         self.seekdb = seekdb_client
 
-    def _ensure_tables(self):
-        """Ensure the required VRAG tables exist."""
-        # ai_vrag_sessions: session metadata
-        self.seekdb.execute_sync("""
-            CREATE TABLE IF NOT EXISTS ai_vrag_sessions (
-                session_id VARCHAR(255) PRIMARY KEY,
-                notebook_id VARCHAR(255) NOT NULL,
-                created_at DATETIME NOT NULL,
-                updated_at DATETIME NOT NULL,
-                question_count INT DEFAULT 0,
-                total_steps INT DEFAULT 0,
-                metadata JSON NULL,
-                KEY idx_notebook (notebook_id),
-                KEY idx_updated (updated_at)
-            )
-        """)
-
-        # ai_vrag_state: per-session state snapshots
-        self.seekdb.execute_sync("""
-            CREATE TABLE IF NOT EXISTS ai_vrag_state (
-                id VARCHAR(255) PRIMARY KEY,
-                session_id VARCHAR(255) NOT NULL,
-                state_type VARCHAR(64) NOT NULL,  -- 'memory_graph' | 'evidence' | 'messages' | 'config'
-                state_data JSON NOT NULL,
-                version INT DEFAULT 0,
-                created_at DATETIME NOT NULL,
-                updated_at DATETIME NOT NULL,
-                KEY idx_session (session_id),
-                KEY idx_type (state_type),
-                KEY idx_session_type (session_id, state_type)
-            )
-        """)
-
-        logger.info("VRAG checkpoint tables ensured")
-
     def _upsert_state(self, state_id: str, session_id: str, state_type: str, state_data: str):
         """Upsert a state record into ai_vrag_state table."""
         now = datetime.utcnow().isoformat()
@@ -103,16 +68,24 @@ class SeekDBSaver:
         Returns:
             True if successful.
         """
-        self._ensure_tables()
-
         now = datetime.utcnow().isoformat()
-        metadata_json = json.dumps(metadata or {})
 
         # Check if session exists
         existing = self.seekdb.fetch_one_sync(
-            "SELECT session_id FROM ai_vrag_sessions WHERE session_id = %s",
+            "SELECT session_id, metadata FROM ai_vrag_sessions WHERE session_id = %s",
             (session_id,)
         )
+
+        merged_metadata: dict[str, Any] = {}
+        if existing and existing.get("metadata"):
+            try:
+                merged_metadata.update(json.loads(existing["metadata"]))
+            except (json.JSONDecodeError, TypeError):
+                logger.warning(f"Failed to parse metadata for session {session_id}, overwriting")
+        if metadata:
+            merged_metadata.update(metadata)
+
+        metadata_json = json.dumps(merged_metadata)
 
         if existing:
             self.seekdb.execute_sync(
@@ -136,7 +109,6 @@ class SeekDBSaver:
         Returns:
             Session metadata dict, or None if not found.
         """
-        self._ensure_tables()
         result = self.seekdb.fetch_one_sync(
             "SELECT * FROM ai_vrag_sessions WHERE session_id = %s",
             (session_id,)
@@ -158,8 +130,6 @@ class SeekDBSaver:
         Returns:
             True if successful.
         """
-        self._ensure_tables()
-
         state_id = f"{session_id}_memory_graph"
         state_data = json.dumps(memory_graph.to_dict())
         self._upsert_state(state_id, session_id, "memory_graph", state_data)
@@ -176,8 +146,6 @@ class SeekDBSaver:
         Returns:
             MultimodalMemoryGraph instance, or None if not found.
         """
-        self._ensure_tables()
-
         state_id = f"{session_id}_memory_graph"
         result = self.seekdb.fetch_one_sync(
             "SELECT state_data FROM ai_vrag_state WHERE id = %s",
@@ -203,8 +171,6 @@ class SeekDBSaver:
         Returns:
             True if successful.
         """
-        self._ensure_tables()
-
         state_id = f"{session_id}_evidence"
         state_data = json.dumps(evidence)
         self._upsert_state(state_id, session_id, "evidence", state_data)
@@ -221,8 +187,6 @@ class SeekDBSaver:
         Returns:
             List of evidence dicts.
         """
-        self._ensure_tables()
-
         state_id = f"{session_id}_evidence"
         result = self.seekdb.fetch_one_sync(
             "SELECT state_data FROM ai_vrag_state WHERE id = %s",
@@ -247,8 +211,6 @@ class SeekDBSaver:
         Returns:
             True if successful.
         """
-        self._ensure_tables()
-
         state_id = f"{session_id}_messages"
         state_data = json.dumps(messages)
         self._upsert_state(state_id, session_id, "messages", state_data)
@@ -264,8 +226,6 @@ class SeekDBSaver:
         Returns:
             List of message dicts.
         """
-        self._ensure_tables()
-
         state_id = f"{session_id}_messages"
         result = self.seekdb.fetch_one_sync(
             "SELECT state_data FROM ai_vrag_state WHERE id = %s",
@@ -310,8 +270,6 @@ class SeekDBSaver:
         Returns:
             List of session metadata dicts.
         """
-        self._ensure_tables()
-
         if notebook_id:
             results = self.seekdb.fetch_all_sync(
                 "SELECT * FROM ai_vrag_sessions WHERE notebook_id = %s ORDER BY updated_at DESC LIMIT %s",

@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { isAxiosError } from 'axios'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { vragApi } from '@/lib/api/vrag'
 import { sourcesApi } from '@/lib/api/sources'
 import { insightsApi, SourceInsightResponse } from '@/lib/api/insights'
 import { transformationsApi } from '@/lib/api/transformations'
@@ -60,6 +61,7 @@ import {
   Database,
   AlertCircle,
   MessageSquare,
+  Zap,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { getDateLocale } from '@/lib/utils/date-locale'
@@ -93,6 +95,7 @@ export function SourceDetailContent({
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [isEmbedding, setIsEmbedding] = useState(false)
+  const [isIndexingVRAG, setIsIndexingVRAG] = useState(false)
   const [isDownloadingFile, setIsDownloadingFile] = useState(false)
   const [fileAvailable, setFileAvailable] = useState<boolean | null>(null)
   const [selectedInsight, setSelectedInsight] = useState<SourceInsightResponse | null>(null)
@@ -269,6 +272,43 @@ export function SourceDetailContent({
       toast.error(t.common.error)
     } finally {
       setIsEmbedding(false)
+    }
+  }
+
+  const handleIndexVRAG = async () => {
+    if (!source) return
+
+    const filePath = source.asset?.file_path || ''
+    const isPdf = filePath.toLowerCase().endsWith('.pdf')
+
+    // Only PDF files can be indexed for VRAG
+    if (!filePath || !isPdf) {
+      toast.error(t.vrag?.index?.pdfOnlyError || 'Only PDF files can be indexed for visual search.')
+      return
+    }
+
+    try {
+      setIsIndexingVRAG(true)
+      const result = await vragApi.rebuildIndex(sourceId, true)
+      const r = result.rebuild_result
+      if (r && r.errors > 0) {
+        toast.error(
+          `${r.rebuilt}/${r.total} images indexed, ${r.errors} errors`
+        )
+      } else {
+        toast.success(
+          t.vrag?.index?.indexSuccess || 'Images indexed successfully',
+          { description: `${r?.rebuilt || 0}/${r?.total || 0} images indexed` }
+        )
+      }
+    } catch (err) {
+      console.error('Failed to index images for VRAG:', err)
+      const msg = err instanceof Error ? err.message : String(err)
+      toast.error(t.vrag?.index?.indexError || 'Failed to index images', {
+        description: msg,
+      })
+    } finally {
+      setIsIndexingVRAG(false)
     }
   }
 
@@ -477,6 +517,21 @@ export function SourceDetailContent({
                   <Database className="mr-2 h-4 w-4" />
                   {isEmbedding ? t.sources.embedding : source.embedded ? t.sources.alreadyEmbedded : t.sources.embedContent}
                 </DropdownMenuItem>
+                {/* VRAG Image Index - only for PDF files */}
+                {source.asset?.file_path?.toLowerCase().endsWith('.pdf') && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={handleIndexVRAG}
+                      disabled={isIndexingVRAG}
+                    >
+                      <Zap className="mr-2 h-4 w-4" />
+                      {isIndexingVRAG
+                        ? (t.vrag?.index?.indexing || 'Indexing...')
+                        : (t.vrag?.index?.indexImages || 'Index Images for Visual Search')}
+                    </DropdownMenuItem>
+                  </>
+                )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   className="text-destructive"

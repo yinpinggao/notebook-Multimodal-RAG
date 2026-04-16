@@ -8,6 +8,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Literal, Optional
 
 from langchain_core.messages import HumanMessage
@@ -71,6 +72,7 @@ class VRAGAgentState:
     actions: list[AgentAction] = field(default_factory=list)
     thoughts: list[AgentThought] = field(default_factory=list)
     current_answer: str = ""
+    messages: list[dict[str, Any]] = field(default_factory=list)
     max_steps: int = DEFAULT_MAX_STEPS
     steps_remaining: int = DEFAULT_MAX_STEPS
     is_complete: bool = False
@@ -86,6 +88,7 @@ class VRAGAgentState:
             "collected_evidence_count": len(self.collected_evidence),
             "actions": [a.to_dict() for a in self.actions],
             "current_answer": self.current_answer,
+            "messages": self.messages,
             "steps_remaining": self.steps_remaining,
             "is_complete": self.is_complete,
             "error": self.error,
@@ -158,7 +161,7 @@ class VRAGAgent:
 
         return tool_calls
 
-    def _think_and_act(self, state: VRAGAgentState) -> AgentThought:
+    async def _think_and_act(self, state: VRAGAgentState) -> AgentThought:
         """Let the LLM think about the next action and return it.
 
         Args:
@@ -247,7 +250,11 @@ Your response:"""
 
         # Execute the first tool call
         tool_name, tool_input = tool_calls[0]
-        tool_output = self._execute_tool(tool_name, tool_input, state)
+        try:
+            tool_output = await self._execute_tool(tool_name, tool_input, state)
+        except Exception as e:
+            logger.error(f"Tool execution failed for {tool_name}: {e}")
+            tool_output = {"error": str(e)}
 
         return AgentThought(
             thought=thought_text,
@@ -302,7 +309,23 @@ Your response:"""
             )
             return response.choices[0].message.content or ""
 
-    def _execute_tool(
+    @staticmethod
+    def _memory_entries_from_graph(state: VRAGAgentState) -> list[MemoryEntry]:
+        return [
+            MemoryEntry(
+                id=node.id,
+                type=node.type,
+                summary=node.summary,
+                parent_ids=list(node.parent_ids),
+                images=list(node.images),
+                priority=node.priority,
+                is_useful=node.is_useful,
+                key_insight=node.key_insight,
+            )
+            for node in state.memory_graph.get_useful_nodes()
+        ]
+
+    async def _execute_tool(
         self,
         tool_name: str,
         tool_input: dict,
@@ -320,7 +343,7 @@ Your response:"""
         """
         if tool_name == "search":
             query = tool_input.get("query", state.question)
-            result = self.tools.search(
+            result = await self.tools.search(
                 query=query,
                 source_ids=state.source_ids,
             )
@@ -328,9 +351,19 @@ Your response:"""
             state.collected_evidence.append({
                 "type": "search",
                 "query": query,
-                "images": [img.to_dict() if hasattr(img, 'to_dict') else img for img in result.images],
+                "images": list(result.images),
                 "texts": result.texts,
             })
+            state.memory_graph.add_node(
+                node_type="search",
+                summary=f"Search for '{query}': found {result.total_image_hits} images and {result.total_text_hits} texts",
+                images=[img.get("image_path", "") for img in result.images[:2]],
+                priority=0.7,
+                is_useful=result.total_image_hits > 0 or result.total_text_hits > 0,
+                key_insight="; ".join(
+                    [img.get("summary", "") for img in result.images[:2] if img.get("summary")]
+                ) or "No strong visual evidence found",
+            )
             return result.to_dict()
 
         elif tool_name == "bbox_crop":
@@ -356,14 +389,12 @@ Your response:"""
             summary_result = self.tools.summarize(
                 search_results=state.search_results,
                 question=state.question,
-                memory_graph=[MemoryEntry(**m.to_dict()) for m in state.memory_graph.get_useful_nodes()],
+                memory_graph=self._memory_entries_from_graph(state),
             )
 
-            # Update memory graph with summarize results
-            node_id = state.memory_graph.add_node(
+            state.memory_graph.add_node(
                 node_type="summarize",
                 summary=summary_result.get("summary", ""),
-                parent_ids=[state.actions[-1].action.node_id if state.actions else None],
                 priority=0.8,
                 is_useful=True,
                 key_insight=summary_result.get("summary", "")[:200],
@@ -375,11 +406,17 @@ Your response:"""
             # Generate the final answer
             answer = self.tools.answer(
                 question=state.question,
-                memory_entries=[MemoryEntry(**m.to_dict()) for m in state.memory_graph.get_useful_nodes()],
+                memory_entries=self._memory_entries_from_graph(state),
                 collected_evidence=state.collected_evidence,
             )
             state.current_answer = answer
             state.is_complete = True
+            state.messages.append({
+                "id": f"ai-{len(state.messages) + 1}",
+                "type": "ai",
+                "content": answer,
+                "timestamp": datetime.utcnow().isoformat(),
+            })
 
             # Add answer node to memory graph
             state.memory_graph.add_node(
@@ -396,19 +433,42 @@ Your response:"""
             logger.warning(f"Unknown tool: {tool_name}")
             return {"error": f"Unknown tool: {tool_name}"}
 
-    def run(self, question: str, source_ids: Optional[list[str]] = None) -> VRAGAgentState:
+    async def run(
+        self,
+        question: str,
+        source_ids: Optional[list[str]] = None,
+        context: str = "",
+        memory_graph: Optional[MultimodalMemoryGraph] = None,
+        collected_evidence: Optional[list[dict]] = None,
+        messages: Optional[list[dict[str, Any]]] = None,
+    ) -> VRAGAgentState:
         """Run the VRAG agent to answer a question.
 
         Args:
             question: The user's question.
             source_ids: Optional list of source IDs to search within.
+            context: Optional extra context for the run.
+            memory_graph: Existing memory graph to continue from.
+            collected_evidence: Existing evidence to continue from.
+            messages: Existing message history.
 
         Returns:
             VRAGAgentState with the final answer and reasoning trace.
         """
+        existing_messages = list(messages or [])
+        user_message = {
+            "id": f"user-{len(existing_messages) + 1}",
+            "type": "human",
+            "content": question,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
         state = VRAGAgentState(
             question=question,
+            context=context,
             source_ids=source_ids or [],
+            memory_graph=memory_graph or MultimodalMemoryGraph(),
+            collected_evidence=list(collected_evidence or []),
+            messages=existing_messages + [user_message],
             max_steps=self.max_steps,
             steps_remaining=self.max_steps,
         )
@@ -418,7 +478,7 @@ Your response:"""
         while not state.is_complete and state.steps_remaining > 0:
             state.steps_remaining -= 1
 
-            thought = self._think_and_act(state)
+            thought = await self._think_and_act(state)
 
             if thought.action:
                 state.thoughts.append(thought)
@@ -427,6 +487,10 @@ Your response:"""
                     f"Step {len(state.actions)}: {thought.action.tool_name} -> "
                     f"{str(thought.action.tool_output)[:100]}..."
                 )
+
+                if isinstance(thought.action.tool_output, dict) and thought.action.tool_output.get("error"):
+                    state.error = str(thought.action.tool_output["error"])
+                    break
 
                 # Check if answer was generated
                 if thought.action.tool_name == "answer":
@@ -438,26 +502,38 @@ Your response:"""
                 try:
                     answer = self.tools.answer(
                         question=state.question,
-                        memory_entries=[MemoryEntry(**m.to_dict()) for m in state.memory_graph.get_useful_nodes()],
+                        memory_entries=self._memory_entries_from_graph(state),
                         collected_evidence=state.collected_evidence,
                     )
                     state.current_answer = answer
                     state.is_complete = True
+                    state.messages.append({
+                        "id": f"ai-{len(state.messages) + 1}",
+                        "type": "ai",
+                        "content": answer,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
                 except Exception as e:
                     state.error = str(e)
                     logger.error(f"Direct answer failed: {e}")
 
-        if not state.is_complete:
+        if not state.is_complete and not state.error:
             logger.warning(f"VRAG Agent reached max steps ({self.max_steps}) without completing")
             # Try to generate an answer anyway
             try:
                 answer = self.tools.answer(
                     question=state.question,
-                    memory_entries=[MemoryEntry(**m.to_dict()) for m in state.memory_graph.get_useful_nodes()],
+                    memory_entries=self._memory_entries_from_graph(state),
                     collected_evidence=state.collected_evidence,
                 )
                 state.current_answer = answer
                 state.is_complete = True
+                state.messages.append({
+                    "id": f"ai-{len(state.messages) + 1}",
+                    "type": "ai",
+                    "content": answer,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
             except Exception as e:
                 state.error = f"Max steps reached, answer generation failed: {e}"
 

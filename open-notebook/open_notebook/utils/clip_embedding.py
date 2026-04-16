@@ -6,7 +6,9 @@ This module bridges the gap between the text-only embedding utilities and
 the multimodal retrieval needs of the VRAG system.
 """
 
+import base64
 import logging
+from pathlib import Path
 from typing import List, Optional
 
 from open_notebook.ai.key_provider import get_api_key
@@ -14,8 +16,31 @@ from open_notebook.ai.key_provider import get_api_key
 logger = logging.getLogger(__name__)
 
 DEFAULT_CLIP_MODEL = "clip-ViT-L-14"
-FALLBACK_TEXT_MODEL = "text-embedding-3-large"
 DEFAULT_EMBEDDING_DIM = 768
+
+
+def _image_input_to_data_url(image_input: str) -> str:
+    """Normalize an image path, base64 string, or data URL to a data URL."""
+    if not image_input:
+        raise ValueError("Image input cannot be empty.")
+
+    if image_input.startswith("data:image/"):
+        return image_input
+
+    image_path = Path(image_input)
+    if image_path.exists() and image_path.is_file():
+        suffix = image_path.suffix.lower()
+        mime_type = "image/png"
+        if suffix in {".jpg", ".jpeg"}:
+            mime_type = "image/jpeg"
+        elif suffix == ".webp":
+            mime_type = "image/webp"
+        elif suffix == ".gif":
+            mime_type = "image/gif"
+        encoded = base64.b64encode(image_path.read_bytes()).decode("utf-8")
+        return f"data:{mime_type};base64,{encoded}"
+
+    return f"data:image/png;base64,{image_input}"
 
 
 def _create_openai_client(api_key: Optional[str] = None):
@@ -61,11 +86,11 @@ async def get_clip_api_key() -> Optional[str]:
     return await get_api_key("openai")
 
 
-def embed_image(image_base64: str, model: str = DEFAULT_CLIP_MODEL) -> List[float]:
+def embed_image(image_input: str, model: str = DEFAULT_CLIP_MODEL) -> List[float]:
     """Embed an image using CLIP model.
 
     Args:
-        image_base64: Base64-encoded image data (without data URI prefix).
+        image_input: Image file path, base64-encoded image data, or data URL.
         model: CLIP model name (default: clip-ViT-L-14).
 
     Returns:
@@ -84,12 +109,13 @@ def embed_image(image_base64: str, model: str = DEFAULT_CLIP_MODEL) -> List[floa
             "Configure an embedding model in Settings → Models, "
             "or set OPENAI_API_KEY environment variable."
         )
+    image_data_url = _image_input_to_data_url(image_input)
     try:
         response = client.embeddings.create(
             model=model,
             input=[{
                 "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{image_base64}"},
+                "image_url": {"url": image_data_url},
             }],
         )
         return response.data[0].embedding
@@ -112,7 +138,7 @@ def embed_text(text: str, model: str = DEFAULT_CLIP_MODEL) -> List[float]:
         Embedding vector as list of floats.
 
     Raises:
-        RuntimeError: If no API key is available and no fallback works.
+        RuntimeError: If CLIP text embedding is unavailable.
     """
     import openai
 
@@ -128,19 +154,11 @@ def embed_text(text: str, model: str = DEFAULT_CLIP_MODEL) -> List[float]:
         response = client.embeddings.create(model=model, input=text)
         return response.data[0].embedding
     except openai.OpenAIError as e:
-        # Catch all OpenAI errors including OpenAIError, APIError, AuthenticationError
-        logger.warning(
-            f"Embedding failed with model {model}: {e}"
+        logger.warning(f"CLIP text embedding failed with model {model}: {e}")
+        raise RuntimeError(
+            "No CLIP text embedding available. Configure an OpenAI-compatible "
+            "CLIP model for multimodal image search."
         )
-        try:
-            response = client.embeddings.create(model=FALLBACK_TEXT_MODEL, input=text)
-            return response.data[0].embedding
-        except openai.OpenAIError:
-            raise RuntimeError(
-                "No API key available for text embedding. "
-                "Configure an embedding model in Settings → Models, "
-                "or set OPENAI_API_KEY environment variable."
-            )
 
 
 def embed_images_batch(

@@ -6,14 +6,13 @@ and legacy OpenAI CLIP API for embedding generation.
 
 import json
 import logging
-import os
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from esperanto import EmbeddingModel, LanguageModel
 
+from open_notebook.seekdb.image_chunk_store import ai_image_chunk_store
 from open_notebook.vrag.utils import (
     classify_image_kind,
     extract_images_from_source,
@@ -52,6 +51,7 @@ class VRAGIndexer:
         embed_image_fn: Optional[Callable[[str], list[float]]] = None,
         embedding_model: Optional[EmbeddingModel] = None,
         vision_model: Optional[LanguageModel] = None,
+        image_chunk_store=None,
     ):
         """Initialize the VRAG indexer.
 
@@ -79,6 +79,13 @@ class VRAGIndexer:
         self.embed_image_fn = embed_image_fn
         self.embedding_model = embedding_model
         self.vision_model = vision_model
+        self.image_chunk_store = image_chunk_store or ai_image_chunk_store
+
+    def _embedding_model_name(self) -> str:
+        return str(getattr(self.embedding_model, "model_name", "") or "").lower()
+
+    def _supports_multimodal_image_embeddings(self) -> bool:
+        return "clip" in self._embedding_model_name()
 
     def _ensure_storage_dir(self, source_id: str) -> Path:
         """Get/create the storage directory for a source's images."""
@@ -89,7 +96,7 @@ class VRAGIndexer:
         storage_dir.mkdir(parents=True, exist_ok=True)
         return storage_dir
 
-    def _encode_image_clip(self, image_path: str) -> list[float]:
+    def _encode_image_clip(self, image_path: str) -> Optional[list[float]]:
         """Encode a single image to CLIP embedding.
 
         Priority order:
@@ -107,11 +114,13 @@ class VRAGIndexer:
         resized_path = resize_image_if_needed(image_path, max_size=self.max_image_size)
 
         if self.embed_image_fn is not None:
-            return self.embed_image_fn(resized_path)
-
-        if self.embedding_model is not None:
             try:
-                # Try embedding_model which supports domestic Chinese models
+                return self.embed_image_fn(resized_path)
+            except Exception as e:
+                logger.warning(f"Image encoder function failed, continuing without vectors: {e}")
+
+        if self.embedding_model is not None and self._supports_multimodal_image_embeddings():
+            try:
                 results = self.embedding_model.embed([resized_path])
                 if results and len(results) > 0:
                     embedding = results[0]
@@ -119,13 +128,19 @@ class VRAGIndexer:
                         return embedding
                     return list(embedding)
             except Exception as e:
-                logger.warning(f"Embedding model failed, falling back to clip_client: {e}")
+                logger.warning(f"Embedding model failed, continuing without vectors: {e}")
+        elif self.embedding_model is not None:
+            logger.warning(
+                "Skipping generic embedding model for image indexing because it is "
+                "not a confirmed multimodal image encoder."
+            )
 
         if self.clip_client is None:
-            raise RuntimeError(
-                "No image embedding available. Provide embed_image_fn, "
-                "embedding_model, or ensure clip_client is set."
+            logger.warning(
+                "No compatible image encoder available. VRAG will index image metadata "
+                "without vectors and fall back to keyword retrieval."
             )
+            return None
 
         image_base64 = get_image_base64_data_url(resized_path)
         try:
@@ -138,8 +153,8 @@ class VRAGIndexer:
             )
             return response.data[0].embedding
         except Exception as e:
-            logger.warning(f"CLIP image encoding failed: {e}")
-            raise
+            logger.warning(f"CLIP image encoding failed, continuing without vectors: {e}")
+            return None
 
     def _generate_image_summary(
         self,
@@ -239,7 +254,7 @@ Description:"""
     def _store_image_chunk(
         self,
         image_info: dict,
-        embedding: list[float],
+        embedding: Optional[list[float]],
         summary: str,
         source_id: str,
     ) -> str:
@@ -262,7 +277,7 @@ Description:"""
             "page_no": image_info["page_no"],
             "image_path": image_info["image_path"],
             "image_summary": summary,
-            "embedding_json": json.dumps(embedding),
+            "embedding_json": json.dumps(embedding) if embedding is not None else None,
             "chunk_kind": classify_image_kind(summary),
             "updated_at": datetime.utcnow().isoformat(),
             "sync_version": 0,
@@ -270,7 +285,7 @@ Description:"""
             "bbox_regions": json.dumps([]),
         }
 
-        self.seekdb.upsert("ai_image_chunks", chunk_data)
+        self.image_chunk_store.upsert_chunk(chunk_data)
         logger.debug(f"Stored image chunk: {chunk_id}")
         return chunk_id
 
@@ -326,7 +341,7 @@ Description:"""
 
             # Check if already indexed
             if skip_existing:
-                existing = self.seekdb.get("ai_image_chunks", chunk_id)
+                existing = self.image_chunk_store.get_chunk(chunk_id)
                 if existing:
                     logger.debug(f"Skipping existing chunk: {chunk_id}")
                     results["skipped"] += 1
@@ -382,10 +397,7 @@ Description:"""
             Dict with rebuild results.
         """
         # Get all existing chunks for this source
-        existing_chunks = self.seekdb.query(
-            "SELECT * FROM ai_image_chunks WHERE source_id = %s",
-            (source_id,),
-        )
+        existing_chunks = self.image_chunk_store.list_chunks_by_source(source_id)
 
         results = {"total": len(existing_chunks), "rebuilt": 0, "errors": 0}
 
@@ -401,7 +413,9 @@ Description:"""
 
                 if regenerate_embeddings:
                     embedding = self._encode_image_clip(image_path)
-                    update_data["embedding_json"] = json.dumps(embedding)
+                    update_data["embedding_json"] = (
+                        json.dumps(embedding) if embedding is not None else None
+                    )
 
                 if regenerate_summaries:
                     summary = self._generate_image_summary(
@@ -411,7 +425,7 @@ Description:"""
                     update_data["image_summary"] = summary
                     update_data["chunk_kind"] = classify_image_kind(summary)
 
-                self.seekdb.update("ai_image_chunks", chunk["id"], update_data)
+                self.image_chunk_store.update_chunk(chunk["id"], update_data)
                 results["rebuilt"] += 1
 
             except Exception as e:
@@ -430,10 +444,6 @@ Description:"""
         Returns:
             Number of entries deleted.
         """
-        deleted = self.seekdb.delete(
-            "ai_image_chunks",
-            where="source_id = %s",
-            params=(source_id,),
-        )
+        deleted = self.image_chunk_store.delete_source_chunks(source_id)
         logger.info(f"Deleted {deleted} image chunks for source {source_id}")
         return deleted

@@ -283,7 +283,7 @@ async def search_action_node(state: VRAGState, tools: VRAGTools) -> dict:
             "images_found": result.total_image_hits,
             "texts_found": result.total_text_hits,
             "top_images": [
-                {"page_no": img.get("page_no"), "summary": img.get("summary", "")[:100]}
+                {"page_no": img.get("page_no"), "summary": img.get("summary", "")[:100], "image_path": img.get("image_path", "")}
                 for img in result.images[:3]
             ],
         }

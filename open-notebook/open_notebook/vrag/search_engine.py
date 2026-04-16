@@ -110,12 +110,21 @@ class VRAGSearchEngine:
         self.embed_image_fn = embed_image_fn
         self.embedding_model = embedding_model
 
+    def _embedding_model_name(self) -> str:
+        return str(getattr(self.embedding_model, "model_name", "") or "").lower()
+
+    def _supports_multimodal_image_embeddings(self) -> bool:
+        return "clip" in self._embedding_model_name()
+
+    def _supports_multimodal_text_embeddings(self) -> bool:
+        return self._supports_multimodal_image_embeddings()
+
     async def _encode_text(self, text: str) -> list[float]:
         """Encode text query to embedding vector.
 
         Priority order:
-        1. embedding_model (Esperanto, preferred for domestic models)
-        2. embed_text_fn (injected, legacy OpenAI CLIP)
+        1. embed_text_fn (injected CLIP text encoder, matched to image search)
+        2. embedding_model (only when no matched CLIP text encoder is available)
         3. clip_client.embeddings.create (direct OpenAI SDK fallback)
 
         Args:
@@ -127,8 +136,17 @@ class VRAGSearchEngine:
         Raises:
             RuntimeError: If no text embedding is available.
         """
-        # Priority 1: embedding_model (Esperanto, domestic Chinese models)
-        if self.embedding_model is not None:
+        # Priority 1: use the matched CLIP text encoder when available so text
+        # queries stay in the same space as indexed image embeddings.
+        if self.embed_text_fn is not None:
+            try:
+                return await asyncio.to_thread(self.embed_text_fn, text)
+            except Exception as e:
+                logger.warning(f"CLIP text encoder failed: {e}")
+
+        # Priority 2: fallback to a generic embedding model only when we do not
+        # have a matched multimodal text encoder.
+        if self.embedding_model is not None and self._supports_multimodal_text_embeddings():
             try:
                 results = self.embedding_model.embed([text])
                 if results and len(results) > 0:
@@ -138,14 +156,11 @@ class VRAGSearchEngine:
                     return list(embedding)
             except Exception as e:
                 logger.warning(f"Embedding model embed() failed: {e}")
-
-        # Priority 2: embed_text_fn (legacy OpenAI CLIP) — sync, use thread pool
-        if self.embed_text_fn is not None:
-            try:
-                return await asyncio.to_thread(self.embed_text_fn, text)
-            except RuntimeError:
-                # No API key available — fall through to next option
-                pass
+        elif self.embedding_model is not None:
+            logger.warning(
+                "Skipping generic embedding model for image-search text encoding because "
+                "it is not a confirmed multimodal encoder."
+            )
 
         # Priority 3: clip_client (direct OpenAI SDK fallback) — sync, use thread pool
         if self.clip_client is not None:
@@ -157,13 +172,8 @@ class VRAGSearchEngine:
                 )
                 return response.data[0].embedding
             except Exception as e:
-                logger.warning(f"CLIP text encoding failed, falling back to text-embedding-3-large: {e}")
-                response = await asyncio.to_thread(
-                    self.clip_client.embeddings.create,
-                    model="text-embedding-3-large",
-                    input=text,
-                )
-                return response.data[0].embedding
+                logger.warning(f"CLIP text encoding failed: {e}")
+                pass
 
         raise RuntimeError(
             "No text embedding available. Provide embedding_model, embed_text_fn, "
@@ -192,12 +202,21 @@ class VRAGSearchEngine:
         if self.embed_image_fn is not None:
             return await asyncio.to_thread(self.embed_image_fn, image_path)
 
-        # Most domestic models don't support image embeddings
-        # Only try embedding_model if it has image capability
-        if self.embedding_model is not None:
-            # Check if model supports image embedding (rare for domestic models)
-            # For now, skip embedding_model for images as they mostly support text only
-            pass
+        if self.embedding_model is not None and self._supports_multimodal_image_embeddings():
+            try:
+                results = self.embedding_model.embed([image_path])
+                if results and len(results) > 0:
+                    embedding = results[0]
+                    if isinstance(embedding, list):
+                        return embedding
+                    return list(embedding)
+            except Exception as e:
+                logger.warning(f"Embedding model image encoding failed: {e}")
+        elif self.embedding_model is not None:
+            logger.warning(
+                "Skipping generic embedding model for image encoding because it is "
+                "not a confirmed multimodal image encoder."
+            )
 
         if self.clip_client is None:
             raise RuntimeError(
@@ -257,10 +276,12 @@ class VRAGSearchEngine:
         source_ids: Optional[list[str]],
         top_k: int,
     ) -> list[tuple[str, float, str]]:
-        """Perform image search via AIRetrievalService.
+        """Perform image search by querying ai_image_chunks table.
 
-        Uses AIRetrievalService.text_search for keyword-based image lookup.
-        Image chunks have image_summary + description fields that get matched.
+        Uses AIRetrievalService.image_hybrid_search() which combines
+        keyword matching (on image_summary) with vector similarity
+        (CLIP embeddings). This enables semantic image search where
+        queries like "charts" match bar charts, pie charts, etc.
 
         Args:
             query: Search query string.
@@ -270,27 +291,20 @@ class VRAGSearchEngine:
         Returns:
             List of (id, score, "image") tuples.
         """
-        # Call text_search directly (async) instead of the sync wrapper,
-        # avoiding the asyncio.get_event_loop() RuntimeError in worker threads.
-        results = await self.retrieval.text_search(
+        # Use hybrid search: keyword + vector similarity for better image retrieval
+        results = await self.retrieval.image_hybrid_search(
             keyword=query,
-            results=top_k * 2,  # Over-fetch for RRF fusion
             source_ids=source_ids,
-            note=False,
+            top_k=top_k,
+            image_query_embedding_fn=self.embed_text_fn,
         )
-        # Filter to only image chunks
-        image_results = [
-            r
-            for r in results
-            if r.get("entity_type") == "image" or r.get("source_kind") == "image"
-        ]
         return [
             (
                 r.get("id", ""),
-                float(r.get("relevance") or r.get("score") or 0.5),
+                float(r.get("score") or 0.5),
                 "image",
             )
-            for r in image_results[:top_k]
+            for r in results[:top_k]
         ]
 
     async def _get_image_results(

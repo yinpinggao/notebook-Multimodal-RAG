@@ -6,12 +6,14 @@ import { toast } from 'sonner'
 import { getApiErrorMessage } from '@/lib/utils/error-handler'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { vragApi } from '@/lib/api/vrag'
+import { flushSSEBuffer, parseSSEChunk } from '@/lib/utils/sse'
 import {
-  VRAGSession,
   VRAGDAG,
-  VRAGStreamEvent,
+  VRAGImageResult,
   VRAGMemoryNode,
-  VRAGImageResult
+  VRAGSession,
+  VRAGSessionDetail,
+  VRAGStreamEvent
 } from '@/lib/types/api'
 
 export interface VRAGMessage {
@@ -31,100 +33,189 @@ export interface VRAGState {
   sessionId: string | null
 }
 
+const EMPTY_DAG: VRAGDAG = { nodes: [], edges: [] }
+
+function normalizeMessages(messages: VRAGSessionDetail['messages']): VRAGMessage[] {
+  return messages.map((message, index) => ({
+    id: message.id || `${message.type}-${index + 1}`,
+    type: message.type,
+    content: message.content,
+    timestamp: message.timestamp || new Date().toISOString(),
+  }))
+}
+
+function extractEvidenceImages(evidence: VRAGSessionDetail['evidence']): VRAGImageResult[] {
+  const images: VRAGImageResult[] = []
+
+  for (const entry of evidence) {
+    if (entry.type !== 'search' || !Array.isArray(entry.images)) {
+      continue
+    }
+
+    for (const image of entry.images as Array<Record<string, unknown>>) {
+      images.push({
+        chunk_id: String(image.chunk_id || image.id || image.image_path || ''),
+        score: Number(image.score || 0),
+        image_path: String(image.image_path || ''),
+        image_base64: typeof image.image_base64 === 'string' ? image.image_base64 : undefined,
+        page_no: Number(image.page_no || 0),
+        source_id: String(image.source_id || ''),
+        summary: typeof image.summary === 'string' ? image.summary : '',
+        bbox: Array.isArray(image.bbox) ? image.bbox as number[] : undefined,
+      })
+    }
+  }
+
+  return images
+}
+
+function getRestoredAnswer(sessionData: VRAGSessionDetail): string {
+  const metadataAnswer = sessionData.session.metadata?.current_answer
+  if (metadataAnswer) {
+    return metadataAnswer
+  }
+
+  const lastAiMessage = [...sessionData.messages].reverse().find((message) => message.type === 'ai')
+  return lastAiMessage?.content || ''
+}
+
+function appendUniqueImages(
+  previous: VRAGImageResult[],
+  nextImages: NonNullable<VRAGStreamEvent['top_images']>
+): VRAGImageResult[] {
+  const byKey = new Map(previous.map((image) => [image.chunk_id || image.image_path, image]))
+
+  for (const image of nextImages) {
+    const key = image.chunk_id || image.image_path
+    byKey.set(key, {
+      chunk_id: image.chunk_id || image.image_path,
+      score: image.score || 0,
+      image_path: image.image_path,
+      page_no: image.page_no,
+      source_id: '',
+      summary: image.summary,
+    })
+  }
+
+  return Array.from(byKey.values())
+}
+
 export function useVRAGChat(notebookId: string) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [messages, setMessages] = useState<VRAGMessage[]>([])
-  const [dag, setDag] = useState<VRAGDAG>({ nodes: [], edges: [] })
+  const [dag, setDag] = useState<VRAGDAG>(EMPTY_DAG)
   const [currentAnswer, setCurrentAnswer] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isComplete, setIsComplete] = useState(false)
+  const [evidenceImages, setEvidenceImages] = useState<VRAGImageResult[]>([])
   const abortControllerRef = useRef<AbortController | null>(null)
+  const autoSelectInitializedRef = useRef(false)
 
-  // Fetch sessions
+  const resetLocalState = useCallback(() => {
+    setMessages([])
+    setDag(EMPTY_DAG)
+    setCurrentAnswer('')
+    setIsComplete(false)
+    setError(null)
+    setEvidenceImages([])
+  }, [])
+
+  useEffect(() => {
+    autoSelectInitializedRef.current = false
+  }, [notebookId])
+
   const { data: sessions = [], isLoading: loadingSessions, refetch: refetchSessions } = useQuery<VRAGSession[]>({
     queryKey: ['vragSessions', notebookId],
     queryFn: () => vragApi.listSessions(notebookId),
     enabled: !!notebookId
   })
 
-  // Fetch current session with full state
-  const { data: currentSessionData, refetch: refetchSession } = useQuery({
+  const { data: currentSessionData, refetch: refetchSession } = useQuery<VRAGSessionDetail>({
     queryKey: ['vragSession', sessionId],
     queryFn: () => vragApi.getSession(sessionId!),
     enabled: !!sessionId
   })
 
-  // Restore DAG from loaded session
   useEffect(() => {
-    if (currentSessionData?.memory_graph) {
-      setDag(currentSessionData.memory_graph)
+    if (!currentSessionData || isStreaming) {
+      return
     }
-  }, [currentSessionData])
 
-  // Auto-select most recent session when sessions are loaded
+    setMessages(normalizeMessages(currentSessionData.messages))
+    setDag(currentSessionData.memory_graph || EMPTY_DAG)
+    setEvidenceImages(extractEvidenceImages(currentSessionData.evidence))
+    setCurrentAnswer(getRestoredAnswer(currentSessionData))
+    setIsComplete(Boolean(
+      currentSessionData.session.metadata?.is_complete ?? getRestoredAnswer(currentSessionData)
+    ))
+    setError(currentSessionData.session.metadata?.last_error || null)
+  }, [currentSessionData, isStreaming])
+
   useEffect(() => {
-    if (sessions.length > 0 && !sessionId) {
-      const mostRecentSession = sessions[0]
-      setSessionId(mostRecentSession.id)
+    if (autoSelectInitializedRef.current || sessionId || sessions.length === 0) {
+      return
     }
+
+    autoSelectInitializedRef.current = true
+    setSessionId(sessions[0].id)
   }, [sessions, sessionId])
 
-  // Switch session
   const switchSession = useCallback((newSessionId: string) => {
-    setSessionId(newSessionId)
-    setMessages([])
-    setDag({ nodes: [], edges: [] })
-    setCurrentAnswer('')
-    setIsComplete(false)
-    setError(null)
-  }, [])
+    autoSelectInitializedRef.current = true
+    setSessionId(newSessionId || null)
+    resetLocalState()
+  }, [resetLocalState])
 
-  // Delete session
   const deleteSession = useCallback(async (id: string) => {
     try {
       await vragApi.deleteSession(id)
-      queryClient.invalidateQueries({ queryKey: ['vragSessions', notebookId] })
+      await queryClient.invalidateQueries({ queryKey: ['vragSessions', notebookId] })
+      await queryClient.removeQueries({ queryKey: ['vragSession', id] })
+
       if (sessionId === id) {
+        autoSelectInitializedRef.current = true
         setSessionId(null)
-        setMessages([])
-        setDag({ nodes: [], edges: [] })
-        setCurrentAnswer('')
-        setIsComplete(false)
-        setError(null)
+        resetLocalState()
       }
+
       toast.success(t.common.success)
     } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } }, message?: string }
-      toast.error(getApiErrorMessage(error.response?.data?.detail || error.message, (key) => t(key)))
+      const apiError = err as { response?: { data?: { detail?: string } }, message?: string }
+      toast.error(getApiErrorMessage(apiError.response?.data?.detail || apiError.message, (key) => t(key)))
     }
-  }, [sessionId, notebookId, queryClient, t])
+  }, [sessionId, notebookId, queryClient, resetLocalState, t])
 
-  // Send message with streaming
   const sendMessage = useCallback(async (
     question: string,
     sourceIds?: string[],
     maxSteps: number = 10,
     context: string = ''
   ) => {
-    // Add user message optimistically
     const userMessage: VRAGMessage = {
-      id: `temp-${Date.now()}`,
+      id: `human-${Date.now()}`,
       type: 'human',
       content: question,
       timestamp: new Date().toISOString()
     }
-    setMessages(prev => [...prev, userMessage])
+
+    setMessages((prev) => [...prev, userMessage])
     setIsStreaming(true)
     setIsComplete(false)
     setCurrentAnswer('')
     setError(null)
-    setDag({ nodes: [], edges: [] })
+
+    abortControllerRef.current?.abort()
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
+
+    let resolvedSessionId = sessionId || null
+    let sawComplete = false
+    let aiMessageId: string | null = null
 
     try {
-      const requestSessionId = sessionId || undefined
       const response = await vragApi.sendMessage(notebookId, {
         question,
         notebook_id: notebookId,
@@ -132,8 +223,14 @@ export function useVRAGChat(notebookId: string) {
         context,
         max_steps: maxSteps,
         stream: true,
-        session_id: requestSessionId
-      })
+        session_id: sessionId || undefined
+      }, abortController.signal)
+
+      const responseSessionId = response.headers.get('X-Session-ID')
+      if (responseSessionId) {
+        resolvedSessionId = responseSessionId
+        setSessionId(responseSessionId)
+      }
 
       if (!response.body) {
         throw new Error('No response body')
@@ -141,125 +238,130 @@ export function useVRAGChat(notebookId: string) {
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
-      let aiMessage: VRAGMessage | null = null
-      const nodesMap = new Map<string, VRAGMemoryNode>()
+      let sseBuffer = ''
+      const nodesMap = new Map(dag.nodes.map((node) => [node.id, node]))
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+      const handleEvent = (data: VRAGStreamEvent) => {
+        if (data.type === 'dag_update') {
+          if (data.node_id && data.node_type && data.summary) {
+            nodesMap.set(data.node_id, {
+              id: data.node_id,
+              type: data.node_type as VRAGMemoryNode['type'],
+              summary: data.summary,
+              parent_ids: [],
+              images: (data.top_images || []).map((image) => image.image_path || ''),
+              priority: 1.0,
+              is_useful: true,
+              key_insight: data.summary.slice(0, 200)
+            })
 
-        const text = decoder.decode(value)
-        const lines = text.split('\n')
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data: VRAGStreamEvent = JSON.parse(line.slice(6))
-
-              if (data.type === 'dag_update') {
-                // Each dag_update event contains a single node update at top level
-                // Backend sends: {type: "dag_update", node: "search_action", node_id: "...", node_type: "search", summary: "..."}
-                if (data.node_id && data.node_type && data.summary) {
-                  const nodeId = data.node_id || `node_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
-                  const newNode: VRAGMemoryNode = {
-                    id: nodeId,
-                    type: data.node_type as VRAGMemoryNode['type'],
-                    summary: data.summary,
-                    parent_ids: [],
-                    images: [],
-                    priority: 1.0,
-                    is_useful: true,
-                    key_insight: data.summary.slice(0, 200)
-                  }
-                  nodesMap.set(nodeId, newNode)
-
-                  setDag({
-                    nodes: Array.from(nodesMap.values()),
-                    edges: []
-                  })
-                }
-              } else if (data.type === 'complete') {
-                setCurrentAnswer(data.answer || '')
-                setIsComplete(true)
-
-                // Create AI message with final answer
-                if (!aiMessage) {
-                  aiMessage = {
-                    id: `ai-${Date.now()}`,
-                    type: 'ai',
-                    content: data.answer || '',
-                    timestamp: new Date().toISOString()
-                  }
-                  setMessages(prev => [...prev, aiMessage!])
-                } else {
-                  aiMessage.content = data.answer || ''
-                  setMessages(prev =>
-                    prev.map(msg => msg.id === aiMessage!.id ? { ...msg, content: aiMessage!.content } : msg)
-                  )
-                }
-              } else if (data.type === 'error') {
-                throw new Error(data.error || 'VRAG stream error')
-              }
-            } catch (e) {
-              if (e instanceof SyntaxError) {
-                // Silently skip malformed JSON (common with SSE)
-                continue
-              }
-              throw e
-            }
+            setDag((current) => ({
+              nodes: Array.from(nodesMap.values()),
+              edges: current.edges
+            }))
           }
+
+          if (data.top_images && data.top_images.length > 0) {
+            setEvidenceImages((prev) => appendUniqueImages(prev, data.top_images!))
+          }
+          return
+        }
+
+        if (data.type === 'complete') {
+          sawComplete = true
+          const answer = data.answer || ''
+          setCurrentAnswer(answer)
+          setIsComplete(true)
+
+          if (!aiMessageId) {
+            aiMessageId = `ai-${Date.now()}`
+            setMessages((prev) => [...prev, {
+              id: aiMessageId!,
+              type: 'ai',
+              content: answer,
+              timestamp: new Date().toISOString()
+            }])
+          } else {
+            setMessages((prev) => prev.map((message) => (
+              message.id === aiMessageId
+                ? { ...message, content: answer }
+                : message
+            )))
+          }
+          return
+        }
+
+        if (data.type === 'error') {
+          throw new Error(data.error || 'VRAG stream error')
         }
       }
 
-      // Extract session ID from response headers
-      const responseSessionId = response.headers.get('X-Session-ID')
-      if (responseSessionId && !sessionId) {
-        setSessionId(responseSessionId)
-        queryClient.invalidateQueries({ queryKey: ['vragSessions', notebookId] })
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) {
+          break
+        }
+
+        const decodedChunk = decoder.decode(value, { stream: true })
+        const parsed = parseSSEChunk(
+          sseBuffer,
+          decodedChunk,
+          (payload) => JSON.parse(payload) as VRAGStreamEvent
+        )
+        sseBuffer = parsed.buffer
+        parsed.events.forEach(handleEvent)
+      }
+
+      const tailEvents = flushSSEBuffer(
+        sseBuffer,
+        (payload) => JSON.parse(payload) as VRAGStreamEvent
+      )
+      tailEvents.forEach(handleEvent)
+
+      if (!sawComplete) {
+        throw new Error('VRAG stream ended before completion event')
       }
     } catch (err: unknown) {
-      const error = err as { message?: string }
-      console.error('VRAG error:', error)
-      setError(error.message || 'Unknown error')
-      toast.error(getApiErrorMessage(error.message || 'apiErrors.vragError', (key) => t(key)))
-      // Remove optimistic messages on error
-      setMessages(prev => prev.filter(msg => !msg.id.startsWith('temp-')))
+      const streamError = err as DOMException & { message?: string }
+      if (streamError?.name === 'AbortError') {
+        setError(null)
+      } else {
+        console.error('VRAG error:', streamError)
+        setError(streamError.message || 'Unknown error')
+        toast.error(getApiErrorMessage(streamError.message || 'apiErrors.vragError', (key) => t(key)))
+      }
     } finally {
+      abortControllerRef.current = null
       setIsStreaming(false)
-      if (sessionId) {
-        refetchSession()
+
+      if (resolvedSessionId) {
+        await queryClient.invalidateQueries({ queryKey: ['vragSessions', notebookId] })
+        await queryClient.invalidateQueries({ queryKey: ['vragSession', resolvedSessionId] })
       }
     }
-  }, [notebookId, sessionId, queryClient, refetchSession, t])
+  }, [notebookId, sessionId, dag.nodes, queryClient, t])
 
-  // Cancel streaming
   const cancelStreaming = useCallback(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-    }
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
     setIsStreaming(false)
   }, [])
 
-  // Reset conversation
   const resetConversation = useCallback(() => {
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    autoSelectInitializedRef.current = true
     setSessionId(null)
-    setMessages([])
-    setDag({ nodes: [], edges: [] })
-    setCurrentAnswer('')
-    setIsComplete(false)
-    setError(null)
-  }, [])
+    resetLocalState()
+  }, [resetLocalState])
 
-  // Get all retrieved images from evidence
   const getEvidenceImages = useCallback((): VRAGImageResult[] => {
-    // This would be populated from collected evidence in session
-    return []
-  }, [])
+    return evidenceImages
+  }, [evidenceImages])
 
   return {
-    // State
     sessions,
-    currentSession: sessions.find(s => s.id === sessionId),
+    currentSession: sessions.find((session) => session.id === sessionId),
     sessionId,
     messages,
     dag,
@@ -269,7 +371,6 @@ export function useVRAGChat(notebookId: string) {
     error,
     loadingSessions,
 
-    // Actions
     sendMessage,
     cancelStreaming,
     switchSession,

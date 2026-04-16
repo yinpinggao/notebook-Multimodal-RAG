@@ -1,5 +1,5 @@
 import operator
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from content_core import extract_content
 from content_core.common import ProcessSourceState
@@ -106,9 +106,16 @@ async def save_source(state: SourceState) -> dict:
     source.asset = Asset(url=content_state.url, file_path=content_state.file_path)
     source.full_text = content_state.content
 
-    # Preserve existing title if none provided in processed content
-    if content_state.title:
-        source.title = content_state.title
+    # Use the extracted title, or derive one from content when empty.
+    # For text sources, content_core may not extract a title.
+    if content_state.title and content_state.title.strip():
+        source.title = content_state.title.strip()
+    elif content_state.content:
+        # Derive a title from the first non-empty line of content.
+        first_line = content_state.content.split("\n")[0].strip()
+        if first_line:
+            # Truncate long titles to 100 characters
+            source.title = (first_line[:100] + "...") if len(first_line) > 100 else first_line
 
     await source.save()
 
@@ -127,13 +134,13 @@ async def save_source(state: SourceState) -> dict:
     return {"source": source}
 
 
-def trigger_transformations(state: SourceState, config: RunnableConfig) -> List[Send]:
+def route_transformations(
+    state: SourceState, config: RunnableConfig
+) -> List[Send] | Literal["__end__"]:
+    """Route: Send parallel tasks if there are transformations, otherwise end."""
     if len(state["apply_transformations"]) == 0:
-        return []
-
-    to_apply = state["apply_transformations"]
-    logger.debug(f"Applying transformations {to_apply}")
-
+        return "__end__"
+    logger.debug(f"Applying transformations {state['apply_transformations']}")
     return [
         Send(
             "transform_content",
@@ -142,7 +149,7 @@ def trigger_transformations(state: SourceState, config: RunnableConfig) -> List[
                 "transformation": t,
             },
         )
-        for t in to_apply
+        for t in state["apply_transformations"]
     ]
 
 
@@ -178,8 +185,12 @@ workflow.add_node("transform_content", transform_content)
 # Define the graph edges
 workflow.add_edge(START, "content_process")
 workflow.add_edge("content_process", "save_source")
+
+# Single conditional edge: handles both cases:
+# - Returns Send objects → fan-out to "transform_content" for each transformation
+# - Returns "__end__" → terminate when there are no transformations
 workflow.add_conditional_edges(
-    "save_source", trigger_transformations, ["transform_content"]
+    "save_source", route_transformations, ["transform_content", "__end__"]
 )
 workflow.add_edge("transform_content", END)
 

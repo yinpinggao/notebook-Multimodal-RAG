@@ -3,12 +3,13 @@
 import { useParams, useRouter } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { VRAGChatPanel } from '@/components/vrag/VRAGChatPanel'
+import { IndexingDialog } from '@/components/vrag/IndexingDialog'
 import { useVRAGChat } from '@/lib/hooks/useVRAGChat'
 import { useNotebookSources } from '@/lib/hooks/use-sources'
 import { useNotebooks } from '@/lib/hooks/use-notebooks'
 import { useTranslation } from '@/lib/hooks/use-translation'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
-import { BookOpen } from 'lucide-react'
+import { BookOpen, DatabaseZap } from 'lucide-react'
 import { useState, useMemo } from 'react'
 import {
   Select,
@@ -17,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Button } from '@/components/ui/button'
 
 export default function VRAGPage() {
   const { t } = useTranslation()
@@ -32,6 +34,9 @@ export default function VRAGPage() {
   // Local state for notebook selection (when no URL param)
   const [selectedNotebookId, setSelectedNotebookId] = useState<string | null>(null)
 
+  // Indexing dialog state
+  const [indexingDialogOpen, setIndexingDialogOpen] = useState(false)
+
   // Determine active notebook ID - prefer URL param, fall back to selection
   const activeNotebookId = notebookIdFromUrl || selectedNotebookId || ''
 
@@ -39,14 +44,14 @@ export default function VRAGPage() {
   const { data: notebooks = [], isLoading: notebooksLoading } = useNotebooks()
 
   // Fetch sources if we have a notebook
-  const { data: sources = [], isLoading: sourcesLoading } = useNotebookSources(activeNotebookId)
+  const { sources, isLoading: sourcesLoading } = useNotebookSources(activeNotebookId)
 
   // Initialize VRAG chat if we have sources
   const vrag = useVRAGChat(activeNotebookId)
 
   // Extract source IDs
   const sourceIds = useMemo(
-    () => (sources as Array<{ id: string }>).map(s => s.id),
+    () => sources.map(s => s.id),
     [sources]
   )
 
@@ -109,6 +114,19 @@ export default function VRAGPage() {
   return (
     <AppShell>
       <div className="flex flex-col flex-1 min-h-0 p-6">
+        {/* Header with indexing button */}
+        <div className="flex items-center justify-end mb-3 flex-shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIndexingDialogOpen(true)}
+            className="gap-1.5 text-xs"
+          >
+            <DatabaseZap className="h-3.5 w-3.5" />
+            {t.vrag?.index?.button || 'Index Sources'}
+          </Button>
+        </div>
+
         <VRAGChatPanel
           messages={vrag.messages}
           isStreaming={vrag.isStreaming}
@@ -127,7 +145,14 @@ export default function VRAGPage() {
           onSwitchSession={vrag.switchSession}
           onDeleteSession={vrag.deleteSession}
           onResetConversation={vrag.resetConversation}
+          getEvidenceImages={vrag.getEvidenceImages}
           sourceIds={sourceIds}
+        />
+
+        <IndexingDialog
+          open={indexingDialogOpen}
+          onOpenChange={setIndexingDialogOpen}
+          sources={sources}
         />
       </div>
     </AppShell>

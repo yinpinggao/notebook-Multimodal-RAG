@@ -1,13 +1,17 @@
+import asyncio
 import json
+import logging
 from collections import defaultdict
 from difflib import SequenceMatcher
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from open_notebook.utils.embedding import generate_embedding
 
 from .client import seekdb_client
 from .index_store import cosine_similarity
 from .page_store import ai_page_store
+
+logger = logging.getLogger(__name__)
 
 VISUAL_QUERY_TERMS = (
     "图片",
@@ -40,9 +44,30 @@ def _json_loads(value: Optional[str], default: Any) -> Any:
 
 
 class AIRetrievalService:
+    def __init__(
+        self,
+        image_query_embedding_fn: Optional[Callable[[str], list[float]]] = None,
+    ):
+        # Image vector search must encode text queries in the same multimodal
+        # space as indexed image embeddings, so we keep a dedicated query encoder.
+        self.image_query_embedding_fn = image_query_embedding_fn
+
     def _is_visual_query(self, keyword: str) -> bool:
         lowered = (keyword or "").lower()
         return any(term in keyword or term in lowered for term in VISUAL_QUERY_TERMS)
+
+    async def _embed_image_query(
+        self,
+        keyword: str,
+        image_query_embedding_fn: Optional[Callable[[str], list[float]]] = None,
+    ) -> list[float]:
+        embedding_fn = image_query_embedding_fn or self.image_query_embedding_fn
+        if embedding_fn is not None:
+            return await asyncio.to_thread(embedding_fn, keyword)
+
+        from open_notebook.utils.clip_embedding import embed_text
+
+        return await asyncio.to_thread(embed_text, keyword)
 
     def _query_boost(
         self, keyword: str, row: dict[str, Any], *, for_vector: bool = False
@@ -634,6 +659,82 @@ class AIRetrievalService:
         }
 
 
+    async def image_text_search(
+        self,
+        keyword: str,
+        source_ids: Optional[list[str]] = None,
+        top_k: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Search image chunks by keyword in image_summary.
+
+        This is the primary method for VRAG image search. It queries the
+        ai_image_chunks table directly with keyword matching on image_summary,
+        returning scored results suitable for RRF fusion.
+
+        Args:
+            keyword: Search keyword.
+            source_ids: Optional filter by source IDs.
+            top_k: Number of results to return.
+
+        Returns:
+            List of image chunk records with fields:
+            id, source_id, page_no, image_path, image_summary, bbox_regions, score.
+            The 'score' field is a relevance score (keyword match count + boost).
+        """
+        if not keyword:
+            return []
+
+        # Build WHERE clause and params
+        # NOTE: We build the WHERE clause with the pattern match,
+        # and conditionally add source_id filter. This avoids invalid SQL
+        # like "source_id IN ()" when source_ids is empty.
+        pattern = f"%{keyword.lower()}%"
+        where_clause = "LOWER(COALESCE(image_summary, '')) LIKE %s"
+        params: list[Any] = [pattern]
+
+        if source_ids:
+            placeholders = ", ".join(["%s"] * len(source_ids))
+            where_clause += f" AND source_id IN ({placeholders})"
+            params.extend(source_ids)
+
+        # Note: we pass keyword.lower() and top_k as separate params (not in params list)
+        # to ensure correct ordering: ORDER BY uses keyword, LIMIT uses top_k
+        rows = await seekdb_client.fetch_all(
+            f"""
+            SELECT id, source_id, page_no, image_path, image_summary, bbox_regions
+            FROM ai_image_chunks
+            WHERE {where_clause}
+            ORDER BY LENGTH(image_summary) - LENGTH(REPLACE(LOWER(image_summary), %s, '')) DESC
+            LIMIT %s
+            """,
+            (*params, keyword.lower(), top_k),
+        )
+
+        # Score each result based on keyword match
+        lowered_keyword = keyword.lower()
+        scored_results = []
+        for row in rows:
+            summary = str(row.get("image_summary") or "")
+            score = summary.lower().count(lowered_keyword)
+            # Boost for shorter summaries that match (more precise)
+            if score > 0 and len(summary) < 200:
+                score += 0.5
+            scored_results.append(
+                {
+                    "id": row.get("id", ""),
+                    "source_id": row.get("source_id", ""),
+                    "page_no": row.get("page_no"),
+                    "image_path": row.get("image_path", ""),
+                    "image_summary": summary,
+                    "bbox_regions": row.get("bbox_regions", "[]"),
+                    "score": float(score or 0.5),
+                    "entity_type": "image",
+                    "source_kind": "image",
+                }
+            )
+
+        return scored_results
+
     async def get_image_chunks_by_ids(
         self, ids: list[str]
     ) -> list[dict[str, Any]]:
@@ -658,10 +759,158 @@ class AIRetrievalService:
             tuple(ids),
         )
 
+    async def image_vector_search(
+        self,
+        keyword: str,
+        source_ids: Optional[list[str]] = None,
+        top_k: int = 20,
+        minimum_score: float = 0.2,
+        image_query_embedding_fn: Optional[Callable[[str], list[float]]] = None,
+    ) -> list[dict[str, Any]]:
+        """Search image chunks by vector similarity using CLIP embeddings.
+
+        Encodes the keyword query with the CLIP text encoder (or another
+        explicitly provided multimodal text encoder), then computes cosine
+        similarity against stored image embeddings in ai_image_chunks. This
+        keeps query and image vectors in the same embedding space.
+
+        Args:
+            keyword: Search keyword or question.
+            source_ids: Optional filter by source IDs.
+            top_k: Number of results to return.
+            minimum_score: Minimum cosine similarity threshold (default 0.2).
+
+        Returns:
+            List of image chunk records with id, source_id, page_no, image_path,
+            image_summary, bbox_regions, and score (cosine similarity).
+        """
+        if not keyword:
+            return []
+
+        # Encode the keyword query in the same multimodal space as image indexing.
+        try:
+            query_embedding = await self._embed_image_query(
+                keyword,
+                image_query_embedding_fn=image_query_embedding_fn,
+            )
+        except Exception as e:
+            # Fall back to image_text_search() through hybrid search if
+            # multimodal query embedding is unavailable.
+            logger.warning(f"Image vector search falling back to text-only retrieval: {e}")
+            return []
+
+        # Build WHERE clause and params
+        # NOTE: We conditionally add source_id filter to avoid invalid SQL
+        # like "source_id IN ()" when source_ids is empty.
+        where_clause = "embedding_json IS NOT NULL AND embedding_json != ''"
+        params: list[Any] = []
+
+        if source_ids:
+            placeholders = ", ".join(["%s"] * len(source_ids))
+            where_clause += f" AND source_id IN ({placeholders})"
+            params.extend(source_ids)
+
+        rows = await seekdb_client.fetch_all(
+            f"""
+            SELECT id, source_id, page_no, image_path, image_summary, bbox_regions, embedding_json
+            FROM ai_image_chunks
+            WHERE {where_clause}
+            """,
+            tuple(params) if params else None,
+        )
+
+        # Compute cosine similarity for each image embedding
+        scored_results = []
+        for row in rows:
+            embedding_list = _json_loads(row.get("embedding_json"), None)
+            if not embedding_list:
+                continue
+            similarity = cosine_similarity(query_embedding, embedding_list)
+            if similarity < minimum_score:
+                continue
+            scored_results.append(
+                {
+                    "id": row.get("id", ""),
+                    "source_id": row.get("source_id", ""),
+                    "page_no": row.get("page_no"),
+                    "image_path": row.get("image_path", ""),
+                    "image_summary": row.get("image_summary", ""),
+                    "bbox_regions": row.get("bbox_regions", "[]"),
+                    "score": float(similarity),
+                    "entity_type": "image",
+                    "source_kind": "image",
+                }
+            )
+
+        # Sort by score descending
+        scored_results.sort(key=lambda x: x["score"], reverse=True)
+        return scored_results[:top_k]
+
+    async def image_hybrid_search(
+        self,
+        keyword: str,
+        source_ids: Optional[list[str]] = None,
+        top_k: int = 20,
+        image_query_embedding_fn: Optional[Callable[[str], list[float]]] = None,
+    ) -> list[dict[str, Any]]:
+        """Hybrid image search: keyword matching + vector similarity.
+
+        Merges results from image_text_search() (keyword) and
+        image_vector_search() (vector similarity) using max-score fusion.
+        This ensures comprehensive coverage: keyword matches find exact
+        text matches while vector search finds semantically related images.
+
+        Args:
+            keyword: Search keyword or question.
+            source_ids: Optional filter by source IDs.
+            top_k: Number of results to return.
+
+        Returns:
+            List of image chunk records with combined scores, sorted by
+            relevance (keyword + vector fusion).
+        """
+        # Run keyword and vector search in parallel
+        import asyncio
+
+        keyword_task = self.image_text_search(keyword=keyword, source_ids=source_ids, top_k=top_k * 2)
+        vector_task = self.image_vector_search(
+            keyword=keyword,
+            source_ids=source_ids,
+            top_k=top_k * 2,
+            image_query_embedding_fn=image_query_embedding_fn,
+        )
+
+        keyword_results, vector_results = await asyncio.gather(keyword_task, vector_task)
+
+        # Merge by max-score fusion: take max score for each image chunk
+        merged: dict[str, dict[str, Any]] = {}
+
+        for r in keyword_results:
+            chunk_id = r["id"]
+            r["score"] = float(r.get("score", 0)) * 0.4  # Weight keyword matches lower
+            merged[chunk_id] = r
+
+        for r in vector_results:
+            chunk_id = r["id"]
+            r["score"] = float(r.get("score", 0)) * 0.6  # Weight vector matches higher
+            if chunk_id in merged:
+                # Fuse: take max score
+                existing = merged[chunk_id]
+                existing["score"] = max(existing["score"], r["score"])
+                # Enrich with keyword result's summary if vector result is missing it
+                if not existing.get("image_summary") and r.get("image_summary"):
+                    existing["image_summary"] = r["image_summary"]
+            else:
+                merged[chunk_id] = r
+
+        # Sort by fused score
+        final_results = sorted(merged.values(), key=lambda x: x["score"], reverse=True)
+        return final_results[:top_k]
+
 
 # --------------------------------------------------------------------------
-    # VRAG Search Helpers (sync wrappers for VRAG search_engine.py)
-    # --------------------------------------------------------------------------
+# VRAG Search Helpers (sync wrappers — DEPRECATED, use async methods above)
+# --------------------------------------------------------------------------
 
     def search_images_sync(
         self, query: str, source_ids: Optional[list[str]], top_k: int

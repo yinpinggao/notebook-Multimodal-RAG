@@ -270,7 +270,12 @@ seekdb-dev-status:
 		echo "  ❌ Not running"; \
 	fi
 	@echo "Worker:"
-	@echo "  In-process with API"
+	@worker_pid="$$(if [ -f "$(SEEKDB_WORKER_PID)" ] && kill -0 "$$(cat "$(SEEKDB_WORKER_PID)")" 2>/dev/null; then cat "$(SEEKDB_WORKER_PID)"; else pgrep -f 'open-notebook-worker' | head -n 1; fi)"; \
+	if [ -n "$$worker_pid" ] && kill -0 "$$worker_pid" 2>/dev/null; then \
+		echo "  ✅ Running (pid $$worker_pid)"; \
+	else \
+		echo "  ❌ Not running"; \
+	fi
 	@echo "Frontend:"
 	@frontend_pid="$$(if [ -f "$(SEEKDB_FRONTEND_PID)" ] && kill -0 "$$(cat "$(SEEKDB_FRONTEND_PID)")" 2>/dev/null; then cat "$(SEEKDB_FRONTEND_PID)"; else pgrep -f '$(CURDIR)/frontend/node_modules/.bin/next dev' | head -n 1; fi)"; \
 	if [ -n "$$frontend_pid" ] && kill -0 "$$frontend_pid" 2>/dev/null; then \

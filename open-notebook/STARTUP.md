@@ -81,7 +81,38 @@ cd frontend && npm run dev
 | `make seekdb-dev-stop` | 停止所有服务 |
 | `make seekdb-dev-status` | 查看各服务运行状态 |
 | `make seekdb-dev-logs` | 实时查看所有服务日志 |
+| `make worker` | 单独启动后台 Worker |
 | `make status` | 查看所有服务状态 |
+
+### 后台 Worker 是什么？
+
+后台 Worker（`open-notebook-worker`）是处理**异步任务**的后台进程，负责：
+
+- 播客生成（文字转语音）
+- 内容向量化（文本嵌入）
+- VRAG 图像索引（PDF 图片提取和嵌入）
+- 洞察创建
+
+**如果 Worker 未运行，以下功能会一直卡在"排队中"状态：**
+- 播客生成
+- 文本嵌入重建
+- VRAG 图像索引
+
+启动 Worker 的方式：
+```bash
+# 方式 1：Worker 随所有服务一起启动（推荐）
+make seekdb-dev-up
+
+# 方式 2：单独启动 Worker（在另一个终端）
+make worker
+# 或
+OPEN_NOTEBOOK_JOB_BACKEND=arq uv run open-notebook-worker
+
+# 方式 3：检查 Worker 是否在运行
+make status
+# 或
+pgrep -f "open-notebook-worker"
+```
 
 ## 环境变量说明
 
@@ -173,6 +204,22 @@ Authorization: Bearer open-notebook-change-me
 
 或修改 `.env.seekdb` 中的 `OPEN_NOTEBOOK_PASSWORD` 为你的密码。
 
+### 任务一直显示"排队中"不执行
+
+这说明**后台 Worker 没有运行**。Worker 负责处理所有异步任务（播客生成、向量化重建、VRAG 索引等）。
+
+检查 Worker 状态：
+```bash
+make status
+```
+
+如果没有运行，启动它：
+```bash
+make worker
+```
+
+任务提交后会在队列中等待，Worker 每秒轮询一次 Redis 队列。启动 Worker 后，排队的任务会立即开始执行。
+
 ### 播客生成无响应
 
 确认后台 Worker 正在运行：
@@ -242,8 +289,17 @@ VRAG 是一个多模态 RAG 系统，能够：
 ### 前提条件
 
 使用 VRAG 前需要：
-1. **OpenAI API Key**：用于 CLIP 嵌入和 GPT-4o 推理
+1. **AI 模型配置**：在设置页面配置用于嵌入和推理的模型
 2. **上传文档**：先将 PDF 文件作为 Source 上传到 notebook
+
+### 前端访问
+
+VRAG 可以通过前端界面直接访问：
+
+1. 打开笔记本页面
+2. 点击左侧导航栏的 **Visual RAG** 菜单（或直接访问 `/vrag?id=你的notebook-id`）
+3. 在 VRAG 页面点击 **"Index Sources"** 按钮为文档建立图像索引
+4. 索引完成后就可以开始对话，询问关于文档中图像的问题
 
 ### API 端点
 

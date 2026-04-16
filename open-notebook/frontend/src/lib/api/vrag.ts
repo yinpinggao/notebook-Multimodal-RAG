@@ -1,8 +1,11 @@
 import apiClient from './client'
 import {
+  VRAGDAG,
   VRAGSearchResult,
   VRAGIndexResult,
   VRAGSession,
+  VRAGSessionDetail,
+  VRAGSessionMetadata,
   CreateVRAGChatRequest,
   SearchVRAGRequest
 } from '@/lib/types/api'
@@ -14,7 +17,7 @@ export interface VRAGStreamResponse {
 
 export const vragApi = {
   // VRAG Chat with streaming
-  sendMessage: (_notebookId: string, data: CreateVRAGChatRequest) => {
+  sendMessage: (_notebookId: string, data: CreateVRAGChatRequest, signal?: AbortSignal) => {
     // Get auth token using the same logic as apiClient interceptor
     let token = null
     if (typeof window !== 'undefined') {
@@ -40,7 +43,8 @@ export const vragApi = {
         'Content-Type': 'application/json',
         ...(token && { 'Authorization': `Bearer ${token}` })
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
+      signal
     }).then(response => {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
@@ -82,7 +86,7 @@ export const vragApi = {
   },
 
   // List VRAG sessions
-  listSessions: async (notebookId?: string, limit: number = 50) => {
+  listSessions: async (notebookId?: string, limit: number = 50): Promise<VRAGSession[]> => {
     const params = new URLSearchParams()
     if (notebookId) params.append('notebook_id', notebookId)
     params.append('limit', limit.toString())
@@ -101,28 +105,32 @@ export const vragApi = {
   getSession: async (sessionId: string) => {
     const response = await apiClient.get<{
       session: Record<string, unknown>
-      memory_graph: any | null
-      evidence: any[]
-      messages: any[]
+      memory_graph: VRAGDAG | null
+      evidence: Array<Record<string, unknown>>
+      messages: VRAGSessionDetail['messages']
     }>(`/vrag/sessions/${sessionId}`)
     const s = response.data.session as Record<string, unknown>
+    const metadata = s.metadata && typeof s.metadata === 'object'
+      ? s.metadata as VRAGSessionMetadata
+      : undefined
     return {
       session: {
         id: String(s.session_id ?? ''),
         notebook_id: String(s.notebook_id ?? ''),
-        title: s.metadata && typeof s.metadata === 'object' ? (s.metadata as Record<string, unknown>).title as string : undefined,
+        title: metadata?.title,
         created: String(s.created_at ?? ''),
         updated: String(s.updated_at ?? ''),
-      } as VRAGSession,
+        metadata,
+      },
       memory_graph: response.data.memory_graph,
       evidence: response.data.evidence,
       messages: response.data.messages,
-    }
+    } as VRAGSessionDetail
   },
 
   // Get the DAG graph for a VRAG session
   getGraph: async (sessionId: string) => {
-    const response = await apiClient.get<any>(`/vrag/sessions/${sessionId}/graph`)
+    const response = await apiClient.get<VRAGDAG>(`/vrag/sessions/${sessionId}/graph`)
     return response.data
   },
 

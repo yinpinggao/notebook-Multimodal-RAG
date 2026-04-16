@@ -248,6 +248,29 @@ export interface VRAGSession {
   title?: string
   created: string
   updated: string
+  metadata?: VRAGSessionMetadata
+}
+
+export interface VRAGSessionMetadata {
+  title?: string
+  last_question?: string
+  current_answer?: string
+  last_answer_preview?: string
+  is_complete?: boolean
+  total_steps?: number
+  last_error?: string | null
+}
+
+export interface VRAGSessionDetail {
+  session: VRAGSession
+  memory_graph: VRAGDAG | null
+  evidence: Array<Record<string, unknown>>
+  messages: Array<{
+    id: string
+    type: 'human' | 'ai'
+    content: string
+    timestamp?: string
+  }>
 }
 
 export interface VRAGMemoryNode {
@@ -280,6 +303,14 @@ export interface VRAGStreamEvent {
   }>
   answer?: string
   error?: string
+  // Image data for the current node (lightweight, from dag_update)
+  top_images?: Array<{
+    chunk_id?: string
+    image_path: string
+    page_no: number
+    score?: number
+    summary: string
+  }>
 }
 
 export interface VRAGSearchResult {
