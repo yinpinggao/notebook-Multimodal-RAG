@@ -737,6 +737,11 @@ export const enUS = {
     steps: "Steps",
     reasoning: "Reasoning...",
     selectNotebook: "Please select a notebook to use Visual RAG",
+    workspaceFallbackTitle: "Using workspace sources",
+    workspaceFallbackDescription: "This notebook has no linked sources. Visual RAG is temporarily using indexed sources from the workspace.",
+    noVisualSourcesTitle: "No visual sources available",
+    noVisualSourcesDescription: "Add or link a PDF source, then build its visual index before starting a Visual RAG chat.",
+    inputDisabledNoSources: "No indexed visual sources are available for this chat.",
     index: {
       title: "Index Sources for Visual RAG",
       description: "Extract and index images from documents for multimodal search.",

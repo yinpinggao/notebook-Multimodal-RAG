@@ -41,6 +41,8 @@ class VRAGSearchResult:
         summary: Optional[str] = None,
         asset_id: Optional[str] = None,
         file_url: Optional[str] = None,
+        asset_type: Optional[str] = None,
+        is_native_image: Optional[bool] = None,
     ):
         self.chunk_id = chunk_id
         self.score = score
@@ -54,6 +56,8 @@ class VRAGSearchResult:
         self.summary = summary
         self.asset_id = asset_id or chunk_id
         self.file_url = file_url
+        self.asset_type = asset_type
+        self.is_native_image = is_native_image
 
     def to_dict(self) -> dict:
         return {
@@ -68,6 +72,8 @@ class VRAGSearchResult:
             "source_id": self.source_id,
             "bbox": self.bbox,
             "summary": self.summary,
+            "asset_type": self.asset_type,
+            "is_native_image": self.is_native_image,
         }
 
 

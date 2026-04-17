@@ -1,12 +1,6 @@
-"""VRAG LangGraph workflow — parallel search, bbox, summarize, answer.
+"""VRAG LangGraph workflow — parallel search, bbox, summarize, answer."""
 
-This module defines the LangGraph workflow for VRAG, featuring:
-- Parallel search execution (text + image search)
-- Conditional branching based on LLM decision
-- Streaming DAG state updates
-- Multimodal memory graph integration
-"""
-
+import asyncio
 import json
 import logging
 import re
@@ -23,6 +17,157 @@ from open_notebook.vrag.prompts import SYSTEM_PROMPT
 from open_notebook.vrag.tools import VRAGTools
 
 logger = logging.getLogger(__name__)
+
+WORKFLOW_SYNC_CALL_TIMEOUT_SECONDS = 45
+FOLLOW_UP_LANGUAGE_MARKERS = (
+    "用中文",
+    "中文回答",
+    "翻译成中文",
+    "改成中文",
+    "换成中文",
+    "用英文",
+    "英文回答",
+    "翻译成英文",
+    "answer in chinese",
+    "respond in chinese",
+    "in chinese",
+    "answer in english",
+    "respond in english",
+    "in english",
+    "translate to chinese",
+    "translate into chinese",
+    "translate to english",
+    "translate into english",
+)
+VISUAL_INVENTORY_MARKERS = (
+    "什么图片",
+    "哪些图片",
+    "什么图",
+    "哪些图",
+    "看见什么",
+    "看到什么",
+    "能看见什么",
+    "能看到什么",
+    "what images",
+    "which images",
+    "what figures",
+    "which figures",
+    "what charts",
+    "which charts",
+    "what can you see",
+    "what do you see",
+)
+VISUAL_DETAIL_FOLLOW_UP_MARKERS = (
+    "详细讲",
+    "详细说",
+    "详细描述",
+    "具体讲",
+    "展开讲",
+    "多讲点",
+    "详细一点",
+    "讲讲图片",
+    "讲讲图",
+    "图片内容",
+    "图片细节",
+    "图里有什么",
+    "图表内容",
+    "表格内容",
+    "describe the image",
+    "describe the picture",
+    "describe the chart",
+    "describe the table",
+    "explain the image",
+    "go into detail",
+    "more detail",
+    "tell me more about the image",
+)
+
+
+def _normalize_follow_up_question(question: str) -> str:
+    return " ".join((question or "").strip().lower().split())
+
+
+def _looks_like_language_follow_up(question: str) -> bool:
+    normalized = _normalize_follow_up_question(question)
+    if not normalized or len(normalized) > 40:
+        return False
+    return any(marker in normalized for marker in FOLLOW_UP_LANGUAGE_MARKERS)
+
+
+def _has_reusable_evidence(state: "VRAGState") -> bool:
+    node_order = getattr(state.memory_graph, "node_order", None) or []
+    return bool(state.collected_evidence or node_order)
+
+
+def _looks_like_visual_inventory_question(question: str) -> bool:
+    normalized = _normalize_follow_up_question(question)
+    if not normalized or len(normalized) > 80:
+        return False
+    return any(marker in normalized for marker in VISUAL_INVENTORY_MARKERS)
+
+
+def _looks_like_visual_detail_follow_up(question: str) -> bool:
+    normalized = _normalize_follow_up_question(question)
+    if not normalized or len(normalized) > 80:
+        return False
+    return any(marker in normalized for marker in VISUAL_DETAIL_FOLLOW_UP_MARKERS)
+
+
+def _has_search_hits(state: "VRAGState") -> bool:
+    for evidence in state.collected_evidence:
+        if evidence.get("type") != "search":
+            continue
+        if evidence.get("images") or evidence.get("texts"):
+            return True
+    return False
+
+
+def _should_reuse_previous_question(question: str) -> bool:
+    return _looks_like_language_follow_up(question) or _looks_like_visual_detail_follow_up(
+        question
+    )
+
+
+def _message_type(message: Any) -> str:
+    if isinstance(message, dict):
+        return str(message.get("type") or message.get("role") or "").lower()
+    return str(getattr(message, "type", getattr(message, "role", "")) or "").lower()
+
+
+def _message_content(message: Any) -> str:
+    if isinstance(message, dict):
+        return str(message.get("content") or "")
+    content = getattr(message, "content", "")
+    if isinstance(content, list):
+        text_parts = [
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        return "\n".join(part for part in text_parts if part)
+    return str(content or "")
+
+
+def _effective_question_for_answer(state: "VRAGState") -> str:
+    if not _should_reuse_previous_question(state.question):
+        return state.question
+
+    for message in reversed(state.messages or []):
+        if _message_type(message) not in {"human", "user"}:
+            continue
+        content = _message_content(message).strip()
+        if not content or _should_reuse_previous_question(content):
+            continue
+        return f"{content}\n\n补充要求：{state.question}"
+
+    return state.question
+
+
+async def _run_sync_call_with_timeout(func, *args, **kwargs):
+    return await asyncio.wait_for(
+        asyncio.to_thread(func, *args, **kwargs),
+        timeout=WORKFLOW_SYNC_CALL_TIMEOUT_SECONDS,
+    )
 
 
 # --- State Schema ---
@@ -137,6 +282,43 @@ Based on the current state, decide the next action:
 
 Your decision (output ONLY the tool call, no extra text):"""
 
+    # Guard: short follow-up prompts like "use Chinese" should reuse evidence.
+    if _has_reusable_evidence(state) and _looks_like_language_follow_up(state.question):
+        logger.info("Agent direct-answer: short language follow-up detected")
+        return {
+            "current_step": "answer",
+            "dag_updates": state.dag_updates + [{
+                "type": "decision",
+                "step": state.max_steps - state.steps_remaining,
+                "action": "answer",
+                "thought": "Reuse existing evidence for language follow-up",
+            }],
+        }
+
+    if _has_search_hits(state) and _looks_like_visual_inventory_question(state.question):
+        logger.info("Agent direct-answer: visual inventory question already has hits")
+        return {
+            "current_step": "answer",
+            "dag_updates": state.dag_updates + [{
+                "type": "decision",
+                "step": state.max_steps - state.steps_remaining,
+                "action": "answer",
+                "thought": "Enough evidence gathered for visual inventory question",
+            }],
+        }
+
+    if _has_search_hits(state) and _looks_like_visual_detail_follow_up(state.question):
+        logger.info("Agent direct-answer: visual detail follow-up detected")
+        return {
+            "current_step": "answer",
+            "dag_updates": state.dag_updates + [{
+                "type": "decision",
+                "step": state.max_steps - state.steps_remaining,
+                "action": "answer",
+                "thought": "Reuse existing evidence for visual detail follow-up",
+            }],
+        }
+
     # Guard: force answer if steps exhausted or useless searches exceeded
     if state.steps_remaining <= 0 or state.consecutive_useless_searches >= 2:
         logger.info(f"Agent force-answer: steps_remaining={state.steps_remaining}, useless={state.consecutive_useless_searches}")
@@ -151,12 +333,24 @@ Your decision (output ONLY the tool call, no extra text):"""
         }
 
     try:
-        llm_response = _llm_invoke(
+        llm_response = await _run_sync_call_with_timeout(
+            _llm_invoke,
             llm_client=tools.llm_client,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=512,
             temperature=0.3,
         )
+    except asyncio.TimeoutError:
+        logger.error("LLM decision timed out, falling back to answer")
+        return {
+            "current_step": "answer",
+            "dag_updates": state.dag_updates + [{
+                "type": "decision",
+                "step": state.max_steps - state.steps_remaining,
+                "action": "answer",
+                "thought": "LLM decision timeout",
+            }],
+        }
     except Exception as e:
         logger.error(f"LLM decision failed: {e}, falling back to answer")
         return {
@@ -266,11 +460,16 @@ async def search_action_node(state: VRAGState, tools: VRAGTools) -> dict:
         logger.info(f"Search result: images={result.total_image_hits}, texts={result.total_text_hits}, consecutive_useless: {current_useless} -> {consecutive_useless}")
 
         # Add to memory graph
+        node_images = [
+            img.get("file_url") or img.get("image_path")
+            for img in result.images[:2]
+            if img.get("file_url") or img.get("image_path")
+        ]
         img_summaries = [img.get("summary", "") for img in result.images[:3]]
         node_id = state.memory_graph.add_node(
             node_type="search",
             summary=f"Search for '{state.question}': found {result.total_image_hits} images",
-            images=[img.get("image_path", "") for img in result.images[:2]],
+            images=node_images,
             priority=0.7,
             is_useful=has_images,
             key_insight="; ".join(img_summaries[:2]) if img_summaries else "No relevant images found",
@@ -291,6 +490,8 @@ async def search_action_node(state: VRAGState, tools: VRAGTools) -> dict:
                     "summary": img.get("summary", "")[:100],
                     "image_path": img.get("image_path", ""),
                     "score": img.get("score"),
+                    "asset_type": img.get("asset_type"),
+                    "is_native_image": img.get("is_native_image"),
                 }
                 for img in result.images[:3]
             ],
@@ -349,7 +550,8 @@ async def bbox_crop_action_node(state: VRAGState, tools: VRAGTools) -> dict:
         return {"error": "No image_path provided for bbox_crop"}
 
     try:
-        result = tools.bbox_crop(
+        result = await _run_sync_call_with_timeout(
+            tools.bbox_crop,
             image_path=image_path,
             bbox=bbox,
             padding=padding,
@@ -412,7 +614,8 @@ async def summarize_action_node(state: VRAGState, tools: VRAGTools) -> dict:
         Updated state dictionary.
     """
     try:
-        result = tools.summarize(
+        result = await _run_sync_call_with_timeout(
+            tools.summarize,
             search_results=state.search_results,
             question=state.question,
             memory_graph=[],  # Will use current memory graph
@@ -463,8 +666,10 @@ async def answer_action_node(state: VRAGState, tools: VRAGTools) -> dict:
         Updated state dictionary with final answer.
     """
     try:
-        answer = tools.answer(
-            question=state.question,
+        effective_question = _effective_question_for_answer(state)
+        answer = await _run_sync_call_with_timeout(
+            tools.answer,
+            question=effective_question,
             memory_entries=[],  # Will use memory graph
             collected_evidence=state.collected_evidence,
         )
@@ -497,9 +702,14 @@ async def answer_action_node(state: VRAGState, tools: VRAGTools) -> dict:
 
     except Exception as e:
         logger.error(f"Answer action failed: {e}")
+        error_message = (
+            "回答生成超时，请重试。"
+            if isinstance(e, asyncio.TimeoutError)
+            else f"Failed to generate answer: {e}"
+        )
         return {
             "error": str(e),
-            "final_answer": f"Failed to generate answer: {e}",
+            "final_answer": error_message,
             "is_complete": True,
             "current_step": "end",
             "steps_remaining": state.steps_remaining - 1,

@@ -14,10 +14,10 @@ from open_notebook.ai.models import model_manager
 from open_notebook.domain.notebook import Source
 from open_notebook.storage.visual_assets import safe_source_dir, visual_asset_store
 from open_notebook.vrag.utils import (
-    classify_image_kind,
     extract_images_from_source,
     get_image_base64_data_url,
     resize_image_if_needed,
+    VISUAL_INDEX_VERSION,
 )
 
 
@@ -36,6 +36,16 @@ class VisualAssetIndexer:
     def __init__(self, default_dpi: int = 150, max_image_size: int = 2048):
         self.default_dpi = default_dpi
         self.max_image_size = max_image_size
+
+    def _asset_id(self, source_id: str, image_info: dict[str, Any]) -> str:
+        page_no = int(image_info.get("page_no") or 0)
+        image_index = int(image_info.get("image_index") or 0)
+        asset_type = str(image_info.get("asset_type") or "")
+        if asset_type == "page_render":
+            return f"visual_asset:page_render:{source_id}:{page_no}"
+        if asset_type == "native_image":
+            return f"visual_asset:native_image:{source_id}:{page_no}:{image_index}"
+        return f"visual_asset:image:{source_id}:{page_no}:{image_index}"
 
     async def index_source(
         self,
@@ -104,12 +114,29 @@ class VisualAssetIndexer:
         for image_info in extracted:
             page_no = int(image_info.get("page_no") or 0)
             image_index = int(image_info.get("image_index") or 0)
-            asset_id = f"visual_asset:image:{source_id}:{page_no}:{image_index}"
+            asset_id = self._asset_id(source_id, image_info)
             if not regenerate and await visual_asset_store.get_asset(asset_id):
                 result["skipped"] += 1
                 continue
 
             image_path = str(image_info.get("image_path") or "")
+            asset_type = str(image_info.get("asset_type") or "").strip() or (
+                "native_image"
+                if image_info.get("is_native_image")
+                else "page_render"
+            )
+            raw_text = (
+                str(image_info.get("raw_text") or "").strip()
+                or str(source.full_text or "")[:1000]
+            )
+            metadata = {
+                **(image_info.get("metadata") or {}),
+                "index_version": VISUAL_INDEX_VERSION,
+                "image_index": image_index,
+                "is_native_image": bool(image_info.get("is_native_image")),
+                "width": image_info.get("width"),
+                "height": image_info.get("height"),
+            }
             try:
                 embedding = await self._encode_image(image_path, embedding_model)
                 summary = (
@@ -122,19 +149,15 @@ class VisualAssetIndexer:
                         "id": asset_id,
                         "source_id": source_id,
                         "legacy_id": None,
-                        "asset_type": classify_image_kind(summary) if summary else "document_image",
+                        "asset_type": asset_type,
                         "media_type": f"image/{image_info.get('format') or 'png'}",
                         "page_no": page_no,
                         "file_path": image_path,
                         "summary": summary,
-                        "raw_text": source.full_text[:2000] if source.full_text else "",
+                        "raw_text": raw_text,
+                        "bbox": image_info.get("bbox") or [],
                         "embedding": embedding or [],
-                        "metadata": {
-                            "image_index": image_index,
-                            "is_native_image": bool(image_info.get("is_native_image")),
-                            "width": image_info.get("width"),
-                            "height": image_info.get("height"),
-                        },
+                        "metadata": metadata,
                         "index_status": "completed",
                         "index_command_id": command_id,
                     }

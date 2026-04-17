@@ -18,6 +18,13 @@ cp .env.seekdb.example .env.seekdb
 make seekdb-dev-up
 ```
 
+`.env.seekdb` 里要保留这两个队列配置，否则视觉索引、重建索引这类后台任务会一直停在排队中：
+
+```bash
+OPEN_NOTEBOOK_JOB_BACKEND=arq
+OPEN_NOTEBOOK_REDIS_URL=redis://127.0.0.1:6379/0
+```
+
 启动完成后访问：
 - 前端：`http://localhost:3000`
 - API 文档：`http://localhost:5055/docs`

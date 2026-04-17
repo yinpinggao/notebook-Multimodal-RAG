@@ -736,6 +736,11 @@ export const zhCN = {
     steps: "步数",
     reasoning: "推理中...",
     selectNotebook: "请选择笔记本以使用视觉 RAG",
+    workspaceFallbackTitle: "正在使用工作区来源",
+    workspaceFallbackDescription: "当前笔记本没有关联来源，视觉 RAG 已临时切换为使用工作区内已完成视觉索引的来源。",
+    noVisualSourcesTitle: "没有可用的视觉来源",
+    noVisualSourcesDescription: "先添加或关联 PDF 来源，并完成视觉索引，然后再开始视觉 RAG 对话。",
+    inputDisabledNoSources: "当前对话没有可用的已索引视觉来源。",
     index: {
       title: "为视觉 RAG 索引文档",
       description: "提取并索引文档中的图像，以便通过视觉查询进行检索。",

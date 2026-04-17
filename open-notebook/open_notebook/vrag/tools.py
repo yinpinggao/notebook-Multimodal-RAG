@@ -21,6 +21,25 @@ from open_notebook.vrag.utils import (
 logger = logging.getLogger(__name__)
 
 
+def _truncate_text(value: str, limit: int = 240) -> str:
+    normalized = " ".join((value or "").strip().split())
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[:limit].rstrip()}..."
+
+
+def _page_label(page_no: Any) -> str:
+    return f"第{page_no}页" if page_no not in (None, "") else "未标注页码"
+
+
+def _is_directly_viewable_image(image: dict[str, Any]) -> bool:
+    return bool(
+        image.get("file_url")
+        or image.get("image_base64")
+        or image.get("image_path")
+    )
+
+
 @dataclass
 class SearchResult:
     """Result from the VRAG search tool."""
@@ -144,6 +163,8 @@ class VRAGTools:
                     "source_id": r.source_id,
                     "summary": r.summary,
                     "bbox": r.bbox,
+                    "asset_type": getattr(r, "asset_type", None),
+                    "is_native_image": getattr(r, "is_native_image", None),
                 }
                 search_result.images.append(img_dict)
             else:
@@ -363,61 +384,125 @@ memorize:
         Returns:
             The final answer text with image references.
         """
-        # Build evidence for the prompt
-        evidence_parts = []
-        for i, ev in enumerate(collected_evidence):
+        visible_image_parts: list[str] = []
+        summarized_image_parts: list[str] = []
+        text_parts: list[str] = []
+        bbox_parts: list[str] = []
+        seen_images: set[tuple[Any, ...]] = set()
+        seen_texts: set[tuple[Any, ...]] = set()
+        seen_bboxes: set[tuple[Any, ...]] = set()
+
+        for ev in collected_evidence:
             ev_type = ev.get("type", "unknown")
             if ev_type == "search":
                 for img in ev.get("images", [])[:3]:
-                    evidence_parts.append(
-                        f"[Image] Page {img['page_no']}: {img.get('summary', 'No summary')}\n"
-                        f"  Path: {img['image_path']}"
+                    page_label = _page_label(img.get("page_no"))
+                    summary = _truncate_text(img.get("summary") or "无摘要")
+                    is_directly_viewable = _is_directly_viewable_image(img)
+                    image_key = (
+                        img.get("asset_id") or img.get("chunk_id") or img.get("page_no"),
+                        summary,
+                        is_directly_viewable,
                     )
+                    if image_key in seen_images:
+                        continue
+                    seen_images.add(image_key)
+
+                    target_parts = (
+                        visible_image_parts
+                        if is_directly_viewable
+                        else summarized_image_parts
+                    )
+                    visibility = (
+                        "可直接查看"
+                        if is_directly_viewable
+                        else "仅有摘要，当前无法直接查看原图"
+                    )
+                    target_parts.append(f"- {page_label}，{visibility}：{summary}")
+
                 for txt in ev.get("texts", [])[:2]:
-                    evidence_parts.append(
-                        f"[Text] Page {txt['page_no']}: {txt.get('text', '')[:300]}..."
+                    snippet = _truncate_text(txt.get("text", ""), limit=300)
+                    text_key = (
+                        txt.get("chunk_id") or txt.get("page_no"),
+                        snippet,
+                    )
+                    if text_key in seen_texts:
+                        continue
+                    seen_texts.add(text_key)
+                    text_parts.append(
+                        f"- {_page_label(txt.get('page_no'))}文本：{snippet}"
                     )
             elif ev_type == "bbox_crop":
-                evidence_parts.append(
-                    f"[BBox Crop] {ev.get('description', 'No description')}\n"
-                    f"  From: {ev.get('original_image', '')}"
+                bbox = tuple(ev.get("bbox") or [])
+                description = _truncate_text(ev.get("description") or "无局部区域描述")
+                bbox_key = (
+                    ev.get("image_path") or ev.get("original_image"),
+                    bbox,
+                    description,
+                )
+                if bbox_key in seen_bboxes:
+                    continue
+                seen_bboxes.add(bbox_key)
+                bbox_parts.append(
+                    f"- 区域 {list(bbox) if bbox else '未提供坐标'}：{description}"
                 )
 
-        evidence_str = "\n".join(evidence_parts)
+        evidence_sections: list[str] = []
+        if visible_image_parts:
+            evidence_sections.append(
+                "### 可直接查看的图片\n" + "\n".join(visible_image_parts)
+            )
+        if summarized_image_parts:
+            evidence_sections.append(
+                "### 只有摘要、当前看不到原图的图片\n"
+                + "\n".join(summarized_image_parts)
+            )
+        if bbox_parts:
+            evidence_sections.append(
+                "### 局部裁剪区域\n" + "\n".join(bbox_parts)
+            )
+        if text_parts:
+            evidence_sections.append(
+                "### 相关文本证据\n" + "\n".join(text_parts)
+            )
+        evidence_str = "\n\n".join(evidence_sections) or "暂无可用证据。"
 
         # Build memory string
         memory_parts = []
         for entry in memory_entries:
             if entry.is_useful:
-                memory_parts.append(f"- [{entry.type}] {entry.summary}")
-        memory_str = "\n".join(memory_parts) or "No memory entries."
+                memory_parts.append(
+                    f"- [{entry.type}] {_truncate_text(entry.summary, limit=200)}"
+                )
+        memory_str = "\n".join(memory_parts) or "暂无记忆条目。"
 
-        prompt = f"""## Question
+        prompt = f"""你是文档视觉问答助手。
+
+默认使用简体中文回答。只有当用户明确要求英文或其他语言时，才切换语言。
+
+回答要自然，像真正看过证据后的结论，不要写成生硬模板。
+不要输出 “Answer: / Visual Evidence: / Limitations:” 这种英文标题。
+
+回答规则：
+1. 先直接回答问题。
+2. 只有在确有必要时，再用简短中文小标题，比如“结论”“依据”“局限”。
+3. 只有“可直接查看的图片”才能说“我看到”或“现在能看到”。
+4. 对“只有摘要、当前看不到原图的图片”，只能说“摘要显示”或“检索结果提示”，不能说“我看到”。
+5. 不要重复同一条证据。
+6. 证据不足时，明确指出缺口，不要过度推断。
+7. 如果用户问“你现在可以看见什么图片”，优先区分“能直接看到的图片”和“只能从摘要得知的图片”。
+
+## 用户问题
 
 {question}
 
-## Collected Visual Evidence
+## 已收集证据
 
 {evidence_str}
 
-## Memory Graph (reasoning steps)
+## 记忆图谱
 
 {memory_str}
-
----
-
-Based on all the visual evidence and reasoning, provide a comprehensive answer to the question.
-
-**Important formatting guidelines:**
-- Cite images by their source and page number, e.g., "As shown in [Figure on page 3]..."
-- Describe what you see in the images (charts, data, diagrams, etc.)
-- If bounding box crops were used, mention the specific region analyzed
-- If the evidence is insufficient to fully answer, clearly state what information is missing
-
-Format your answer with these sections:
-1. **Answer**: Direct answer to the question
-2. **Visual Evidence**: List of images that support the answer
-3. **Limitations**: Any caveats or missing information
 """
 
         try:
@@ -426,7 +511,7 @@ Format your answer with these sections:
                 max_tokens=2048,
                 temperature=0.3,
             )
-            return response or "Failed to generate answer."
+            return response or "未能生成回答。"
 
         except Exception as e:
             logger.error(f"Answer tool failed: {e}")

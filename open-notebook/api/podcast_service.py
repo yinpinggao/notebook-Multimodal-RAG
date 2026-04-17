@@ -5,7 +5,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from open_notebook.domain.notebook import Notebook
-from open_notebook.jobs import get_command_status, submit_command
+from open_notebook.jobs import async_submit_command, get_command_status
 from open_notebook.podcasts.models import EpisodeProfile, PodcastEpisode, SpeakerProfile
 
 
@@ -92,7 +92,11 @@ class PodcastService:
                 logger.error(f"Failed to import podcast commands: {import_err}")
                 raise ValueError("Podcast commands not available")
 
-            job_id = submit_command("open_notebook", "generate_podcast", command_args)
+            job_id = await async_submit_command(
+                "open_notebook",
+                "generate_podcast",
+                command_args,
+            )
 
             if not job_id:
                 raise ValueError("Failed to get job_id from submit_command")

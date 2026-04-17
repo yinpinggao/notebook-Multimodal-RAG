@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from open_notebook.jobs import submit_command
+from open_notebook.jobs import async_submit_command
 from open_notebook.storage.visual_assets import visual_asset_store
 from open_notebook.storage.visual_rag import visual_rag_session_store
 from open_notebook.vrag.memory import MultimodalMemoryGraph
@@ -122,11 +122,37 @@ def _normalize_dag_update(update: dict[str, Any]) -> dict[str, Any]:
         or update.get("thought")
         or ""
     )
+    if not summary and node_type == "search":
+        images_found = int(update.get("images_found") or 0)
+        texts_found = int(update.get("texts_found") or 0)
+        summary = f"找到 {images_found} 张图片，{texts_found} 段文本"
+    elif not summary and node_type == "bbox_crop":
+        summary = str(update.get("description") or "已分析局部图片区域")
+    elif not summary and node_type == "summarize":
+        summary = "已汇总当前证据"
     return {
         **update,
         "node_type": node_type,
         "summary": summary,
     }
+
+
+def _graph_step_count(memory_graph: Any) -> int:
+    node_order = getattr(memory_graph, "node_order", None)
+    if isinstance(node_order, list):
+        return len(node_order)
+
+    legacy_order = getattr(memory_graph, "order", None)
+    if isinstance(legacy_order, list):
+        return len(legacy_order)
+
+    nodes = getattr(memory_graph, "nodes", None)
+    if isinstance(nodes, dict):
+        return len(nodes)
+    if isinstance(nodes, list):
+        return len(nodes)
+
+    return 0
 
 
 async def stream_visual_rag_events(
@@ -156,7 +182,7 @@ async def stream_visual_rag_events(
             question,
             title=session_title,
             is_complete=False,
-            total_steps=len(memory_graph.order),
+            total_steps=_graph_step_count(memory_graph),
         ),
     )
     await visual_rag_session_store.checkpoint_state(
@@ -172,10 +198,13 @@ async def stream_visual_rag_events(
         source_ids=source_ids or [],
         context=context,
     )
+    initial_state.messages = list(persisted_messages)
     initial_state.memory_graph = memory_graph
     initial_state.collected_evidence = evidence
     final_answer = ""
     stream_error: Optional[str] = None
+    complete_emitted = False
+    seen_dag_updates: set[str] = set()
     graph = create_vrag_graph(tools)
 
     try:
@@ -183,10 +212,25 @@ async def stream_visual_rag_events(
             for node_name, node_output in event.items():
                 if "dag_updates" in node_output:
                     for update in node_output["dag_updates"]:
+                        normalized_update = _normalize_dag_update(update)
+                        update_key = json.dumps(
+                            normalized_update,
+                            sort_keys=True,
+                            ensure_ascii=False,
+                        )
+                        if update_key in seen_dag_updates:
+                            continue
+                        seen_dag_updates.add(update_key)
+                        update_type = normalized_update.get("type")
                         payload = {
                             "type": "dag_update",
                             "node": node_name,
-                            **_normalize_dag_update(update),
+                            "update_type": update_type,
+                            **{
+                                key: value
+                                for key, value in normalized_update.items()
+                                if key != "type"
+                            },
                         }
                         await visual_rag_session_store.append_event(
                             session_id,
@@ -196,10 +240,22 @@ async def stream_visual_rag_events(
                         yield f"data: {json.dumps(payload)}\n\n"
                 if node_output.get("is_complete"):
                     final_answer = node_output.get("final_answer", "") or final_answer
+                    complete_emitted = True
                     yield f"data: {json.dumps({'type': 'complete', 'answer': final_answer})}\n\n"
                 if node_output.get("error"):
-                    stream_error = node_output["error"]
-                    yield f"data: {json.dumps({'type': 'error', 'error': stream_error})}\n\n"
+                    logger.warning(
+                        "Visual RAG node %s reported recoverable error: %s",
+                        node_name,
+                        node_output["error"],
+                    )
+
+        final_answer = final_answer or getattr(initial_state, "final_answer", "") or ""
+        workflow_complete = bool(getattr(initial_state, "is_complete", False)) or bool(
+            final_answer
+        )
+        if workflow_complete and stream_error is None and not complete_emitted:
+            complete_emitted = True
+            yield f"data: {json.dumps({'type': 'complete', 'answer': final_answer})}\n\n"
 
         final_messages = list(persisted_messages)
         if final_answer:
@@ -216,8 +272,8 @@ async def stream_visual_rag_events(
             metadata=_build_session_metadata(
                 question,
                 title=session_title,
-                is_complete=stream_error is None and bool(final_answer),
-                total_steps=len(initial_state.memory_graph.order),
+                is_complete=stream_error is None and workflow_complete,
+                total_steps=_graph_step_count(initial_state.memory_graph),
                 answer=final_answer,
                 error=stream_error,
             ),
@@ -231,7 +287,7 @@ async def stream_visual_rag_events(
                 question,
                 title=session_title,
                 is_complete=False,
-                total_steps=len(initial_state.memory_graph.order),
+                total_steps=_graph_step_count(initial_state.memory_graph),
                 error=str(e),
             ),
         )
@@ -335,7 +391,7 @@ async def visual_rag_search(request: VisualRAGSearchRequest):
 async def visual_rag_index(request: VisualIndexRequest):
     import commands.visual_rag_commands  # noqa: F401
 
-    command_id = submit_command(
+    command_id = await async_submit_command(
         "open_notebook",
         "index_visual_source",
         {
@@ -357,7 +413,7 @@ async def visual_rag_index(request: VisualIndexRequest):
 async def visual_rag_reindex(request: VisualIndexRequest):
     import commands.visual_rag_commands  # noqa: F401
 
-    command_id = submit_command(
+    command_id = await async_submit_command(
         "open_notebook",
         "index_visual_source",
         {

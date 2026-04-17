@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -36,6 +36,32 @@ def _json_loads(value: Optional[str], default: Any) -> Any:
         return json.loads(value)
     except Exception:
         return default
+
+
+def _parse_timestamp(value: Optional[Any]) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _is_stale_status(updated_at: Optional[Any], *, max_age_minutes: int = 10) -> bool:
+    parsed = _parse_timestamp(updated_at)
+    if parsed is None:
+        return False
+    return parsed <= datetime.now() - timedelta(minutes=max_age_minutes)
 
 
 def _snippet(text: str, keyword: str, width: int = 220) -> str:
@@ -195,9 +221,17 @@ class VisualAssetStore:
         active_count = int((row or {}).get("active_count") or 0)
         failed_count = int((row or {}).get("failed_count") or 0)
         marker_status = (marker or {}).get("index_status")
-        if marker_status in {"queued", "running"}:
-            status = str(marker_status)
-        elif marker_status == "failed" and not asset_count:
+        marker_command_id = (marker or {}).get("index_command_id")
+        marker_updated_at = (marker or {}).get("updated_at")
+        resolved_marker_status = await self._resolve_marker_status(
+            marker_status,
+            marker_command_id=marker_command_id,
+            marker_updated_at=marker_updated_at,
+            asset_count=asset_count,
+        )
+        if resolved_marker_status in {"queued", "running"}:
+            status = str(resolved_marker_status)
+        elif resolved_marker_status == "failed" and not asset_count:
             status = "failed"
         elif active_count:
             status = "running"
@@ -207,20 +241,51 @@ class VisualAssetStore:
             status = "completed"
         else:
             status = "not_indexed"
-        marker_updated_at = (marker or {}).get("updated_at")
         asset_updated_at = (row or {}).get("last_indexed_at")
         last_indexed_at = (
             marker_updated_at
-            if marker_status in {"queued", "running"}
+            if resolved_marker_status in {"queued", "running"}
             else asset_updated_at or marker_updated_at
         )
         return {
             "visual_asset_count": asset_count,
             "visual_index_status": status,
             "visual_last_indexed_at": str(last_indexed_at or "") or None,
-            "visual_index_command_id": (marker or {}).get("index_command_id")
+            "visual_index_command_id": marker_command_id
             or (row or {}).get("index_command_id"),
         }
+
+    async def _resolve_marker_status(
+        self,
+        marker_status: Optional[str],
+        *,
+        marker_command_id: Optional[str],
+        marker_updated_at: Optional[Any],
+        asset_count: int,
+    ) -> Optional[str]:
+        if marker_status not in {"queued", "running", "failed", "completed"}:
+            return marker_status
+
+        command_status = None
+        if marker_command_id:
+            try:
+                from open_notebook.jobs import job_store
+
+                command_status = await job_store.get_job(marker_command_id)
+            except Exception:
+                command_status = None
+
+        resolved = getattr(command_status, "status", None)
+        if resolved == "cancelled":
+            return "failed"
+        if resolved in {"queued", "running", "failed", "completed"}:
+            if resolved in {"queued", "running"} and _is_stale_status(marker_updated_at):
+                return "completed" if asset_count else "failed"
+            return resolved
+
+        if marker_status in {"queued", "running"} and _is_stale_status(marker_updated_at):
+            return "completed" if asset_count else "failed"
+        return marker_status
 
     async def mark_source_index_status(
         self,
@@ -275,9 +340,17 @@ class VisualAssetStore:
                    metadata_json, index_status, index_command_id, created_at, updated_at
             FROM ai_visual_assets
             WHERE {where_clause}
+            ORDER BY
+                CASE
+                    WHEN asset_type IN ('page_render', 'pdf_page') THEN 0
+                    WHEN asset_type = 'native_image' THEN 1
+                    ELSE 2
+                END,
+                page_no ASC,
+                id ASC
             LIMIT %s
             """,
-            (*params, top_k * 4),
+            (*params, top_k * 8),
         )
 
         keyword_lower = keyword.lower()

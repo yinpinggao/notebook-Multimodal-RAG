@@ -8,7 +8,13 @@ from open_notebook.database.repository import ensure_record_id
 from open_notebook.domain.notebook import Source
 from open_notebook.domain.transformation import Transformation
 from open_notebook.exceptions import ConfigurationError
-from open_notebook.jobs import CommandInput, CommandOutput, command, submit_command
+from open_notebook.jobs import (
+    CommandInput,
+    CommandOutput,
+    async_submit_command,
+    command,
+    submit_command,
+)
 from open_notebook.seekdb import multimodal_indexing_enabled
 
 try:
@@ -125,7 +131,7 @@ async def process_source_command(
                     else None
                 )
                 if file_path and file_path.lower().endswith(".pdf"):
-                    command_id = submit_command(
+                    command_id = await async_submit_command(
                         "open_notebook",
                         "index_visual_source",
                         {

@@ -15,6 +15,9 @@ GHCR_IMAGE := ghcr.io/lfnovo/open-notebook
 # Build platforms
 PLATFORMS := linux/amd64,linux/arm64
 SEEKDB_ENV_FILE ?= .env.seekdb
+SEEKDB_JOB_BACKEND ?= arq
+SEEKDB_REDIS_URL ?= redis://127.0.0.1:6379/0
+SEEKDB_UV_ENV_ARGS := $(if $(wildcard $(SEEKDB_ENV_FILE)),--env-file $(SEEKDB_ENV_FILE),)
 SEEKDB_COMPOSE := docker compose -f docker-compose.dev.yml -f docker-compose.seekdb.yml
 SEEKDB_RUN_DIR := .run/seekdb-dev
 SEEKDB_LOG_DIR := .logs/seekdb-dev
@@ -155,7 +158,7 @@ worker: worker-start
 
 worker-start:
 	@echo "Starting background worker..."
-	@OPEN_NOTEBOOK_JOB_BACKEND=arq uv run open-notebook-worker
+	@OPEN_NOTEBOOK_JOB_BACKEND=$(SEEKDB_JOB_BACKEND) OPEN_NOTEBOOK_REDIS_URL=$${OPEN_NOTEBOOK_REDIS_URL:-$(SEEKDB_REDIS_URL)} uv run $(SEEKDB_UV_ENV_ARGS) open-notebook-worker
 
 worker-stop:
 	@pkill -f "open-notebook-worker" || true
@@ -171,10 +174,10 @@ start-all:
 	@docker compose -f docker-compose.dev.yml -f docker-compose.seekdb.yml up -d seekdb redis
 	@sleep 3
 	@echo "🔧 Starting API backend..."
-	@uv run run_api.py &
+	@OPEN_NOTEBOOK_JOB_BACKEND=$(SEEKDB_JOB_BACKEND) OPEN_NOTEBOOK_REDIS_URL=$${OPEN_NOTEBOOK_REDIS_URL:-$(SEEKDB_REDIS_URL)} uv run $(SEEKDB_UV_ENV_ARGS) run_api.py &
 	@sleep 3
 	@echo "⚙️ Starting background worker..."
-	@OPEN_NOTEBOOK_JOB_BACKEND=arq uv run open-notebook-worker &
+	@OPEN_NOTEBOOK_JOB_BACKEND=$(SEEKDB_JOB_BACKEND) OPEN_NOTEBOOK_REDIS_URL=$${OPEN_NOTEBOOK_REDIS_URL:-$(SEEKDB_REDIS_URL)} uv run $(SEEKDB_UV_ENV_ARGS) open-notebook-worker &
 	@echo "🌐 Starting Next.js frontend..."
 	@echo "✅ All services started!"
 	@echo "📱 Frontend: http://localhost:3000"
@@ -204,7 +207,7 @@ seekdb-dev-up:
 		if [ -n "$$api_pid" ]; then echo "🔧 API already running (pid $$api_pid, port 5055 confirmed)"; echo "$$api_pid" > "$(SEEKDB_API_PID)"; api_running=true; fi; \
 	fi; \
 	if [ "$$api_running" != "true" ]; then rm -f "$(SEEKDB_API_PID)"; echo "🔧 Starting API backend..."; \
-		setsid bash -lc 'exec env API_RELOAD=false uv run --env-file "$(SEEKDB_ENV_FILE)" run_api.py' < /dev/null > "$(SEEKDB_LOG_DIR)/api.log" 2>&1 & echo $$! > "$(SEEKDB_API_PID)"; fi
+		setsid bash -lc 'exec env API_RELOAD=false OPEN_NOTEBOOK_JOB_BACKEND="$(SEEKDB_JOB_BACKEND)" OPEN_NOTEBOOK_REDIS_URL="$${OPEN_NOTEBOOK_REDIS_URL:-$(SEEKDB_REDIS_URL)}" uv run --env-file "$(SEEKDB_ENV_FILE)" run_api.py' < /dev/null > "$(SEEKDB_LOG_DIR)/api.log" 2>&1 & echo $$! > "$(SEEKDB_API_PID)"; fi
 	@echo "⏳ Waiting for API to become ready..."
 	@for i in {1..60}; do \
 		if curl -fsS http://127.0.0.1:5055/api/config >/dev/null 2>&1; then \
@@ -220,11 +223,18 @@ seekdb-dev-up:
 	@worker_running=false; \
 	if [ -f "$(SEEKDB_WORKER_PID)" ] && kill -0 "$$(cat "$(SEEKDB_WORKER_PID)")" 2>/dev/null; then echo "⚙️ Worker already running (pid $$(cat "$(SEEKDB_WORKER_PID)"))"; worker_running=true; \
 	else rm -f "$(SEEKDB_WORKER_PID)"; \
-		existing_worker_pid="$$(pgrep -f 'open-notebook-worker' | head -n 1)"; \
+		existing_worker_pid="$$(ps -eo pid=,args= | grep -E '[o]pen-notebook-worker($$| )|uv run .*open-notebook-worker($$| )' | grep -v 'bash -lc' | awk 'NR==1 {print $$1}')"; \
 		if [ -n "$$existing_worker_pid" ] && kill -0 "$$existing_worker_pid" 2>/dev/null; then echo "$$existing_worker_pid" > "$(SEEKDB_WORKER_PID)"; echo "⚙️ Worker already running (pid $$existing_worker_pid)"; worker_running=true; fi; \
 	fi; \
 	if [ "$$worker_running" != "true" ]; then echo "⚙️ Starting background worker..."; \
-		setsid bash -lc 'exec env OPEN_NOTEBOOK_JOB_BACKEND=arq uv run --env-file "$(SEEKDB_ENV_FILE)" open-notebook-worker' < /dev/null > "$(SEEKDB_LOG_DIR)/worker.log" 2>&1 & echo $$! > "$(SEEKDB_WORKER_PID)"; fi
+		setsid bash -lc 'exec env OPEN_NOTEBOOK_JOB_BACKEND="$(SEEKDB_JOB_BACKEND)" OPEN_NOTEBOOK_REDIS_URL="$${OPEN_NOTEBOOK_REDIS_URL:-$(SEEKDB_REDIS_URL)}" uv run --env-file "$(SEEKDB_ENV_FILE)" open-notebook-worker' < /dev/null > "$(SEEKDB_LOG_DIR)/worker.log" 2>&1 & echo $$! > "$(SEEKDB_WORKER_PID)"; \
+		sleep 2; \
+		if ! kill -0 "$$(cat "$(SEEKDB_WORKER_PID)")" 2>/dev/null; then \
+			echo "❌ Worker failed to start. Check $(SEEKDB_LOG_DIR)/worker.log"; \
+			tail -n 40 "$(SEEKDB_LOG_DIR)/worker.log" || true; \
+			exit 1; \
+		fi; \
+	fi
 
 	@frontend_running=false; \
 	if ss -tlnp 2>/dev/null | grep -q ':3000 '; then \
@@ -252,9 +262,12 @@ seekdb-dev-stop:
 			rm -f "$$pid_file"; fi; \
 	done
 	$(info Fallback: also kill by pattern to catch any orphaned processes)
-	@pkill -f 'run_api.py' 2>/dev/null && echo "🛑 Stopped orphaned API processes" || true
-	@pkill -f 'open-notebook-worker' 2>/dev/null && echo "🛑 Stopped orphaned worker processes" || true
-	@pkill -f 'next dev' 2>/dev/null && echo "🛑 Stopped orphaned frontend processes" || true
+	@api_pids="$$(ps -eo pid=,args= | grep -E '[r]un_api\\.py($$| )' | grep -v 'bash -lc' | awk '{print $$1}')"; \
+	if [ -n "$$api_pids" ]; then echo "$$api_pids" | xargs -r kill 2>/dev/null || true; echo "🛑 Stopped orphaned API processes"; fi
+	@worker_pids="$$(ps -eo pid=,args= | grep -E '[o]pen-notebook-worker($$| )|uv run .*open-notebook-worker($$| )' | grep -v 'bash -lc' | awk '{print $$1}')"; \
+	if [ -n "$$worker_pids" ]; then echo "$$worker_pids" | xargs -r kill 2>/dev/null || true; echo "🛑 Stopped orphaned worker processes"; fi
+	@frontend_pids="$$(ps -eo pid=,args= | grep -E '[n]ext dev($$| )' | grep -v 'bash -lc' | awk '{print $$1}')"; \
+	if [ -n "$$frontend_pids" ]; then echo "$$frontend_pids" | xargs -r kill 2>/dev/null || true; echo "🛑 Stopped orphaned frontend processes"; fi
 	@$(SEEKDB_COMPOSE) down
 	@echo "✅ SeekDB dev stack stopped"
 
@@ -270,7 +283,7 @@ seekdb-dev-status:
 		echo "  ❌ Not running"; \
 	fi
 	@echo "Worker:"
-	@worker_pid="$$(if [ -f "$(SEEKDB_WORKER_PID)" ] && kill -0 "$$(cat "$(SEEKDB_WORKER_PID)")" 2>/dev/null; then cat "$(SEEKDB_WORKER_PID)"; else pgrep -f 'open-notebook-worker' | head -n 1; fi)"; \
+	@worker_pid="$$(if [ -f "$(SEEKDB_WORKER_PID)" ] && kill -0 "$$(cat "$(SEEKDB_WORKER_PID)")" 2>/dev/null; then cat "$(SEEKDB_WORKER_PID)"; else ps -eo pid=,args= | grep -E '[o]pen-notebook-worker($$| )|uv run .*open-notebook-worker($$| )' | grep -v 'bash -lc' | awk 'NR==1 {print $$1}'; fi)"; \
 	if [ -n "$$worker_pid" ] && kill -0 "$$worker_pid" 2>/dev/null; then \
 		echo "  ✅ Running (pid $$worker_pid)"; \
 	else \
@@ -308,7 +321,7 @@ status:
 	@echo "API Backend:"
 	@pgrep -f "run_api.py\|uvicorn api.main:app" >/dev/null && echo "  ✅ Running" || echo "  ❌ Not running"
 	@echo "Background Worker:"
-	@pgrep -f "open-notebook-worker" >/dev/null && echo "  ✅ Running" || echo "  ❌ Not running"
+	@ps -eo pid=,args= | grep -E '[o]pen-notebook-worker($$| )|uv run .*open-notebook-worker($$| )' | grep -v 'bash -lc' >/dev/null && echo "  ✅ Running" || echo "  ❌ Not running"
 	@echo "Next.js Frontend:"
 	@pgrep -f "next dev" >/dev/null && echo "  ✅ Running" || echo "  ❌ Not running"
 

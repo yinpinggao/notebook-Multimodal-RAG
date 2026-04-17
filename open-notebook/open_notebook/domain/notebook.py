@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from open_notebook.domain.base import ObjectModel
 from open_notebook.exceptions import DatabaseOperationError, InvalidInputError
-from open_notebook.jobs import get_command_status, submit_command
+from open_notebook.jobs import async_submit_command, get_command_status, submit_command
 from open_notebook.seekdb import (
     ai_index_store,
     ai_retrieval_service,
@@ -362,7 +362,7 @@ class Source(ObjectModel):
         result = await self.relate("reference", notebook_id)
         if use_seekdb_for_search() and self.id and self.full_text and self.full_text.strip():
             try:
-                submit_command(
+                await async_submit_command(
                     "open_notebook",
                     "sync_seekdb_source_chunks",
                     {"source_id": str(self.id)},
@@ -398,7 +398,7 @@ class Source(ObjectModel):
                 raise ValueError(f"Source {self.id} has no text to vectorize")
 
             # Submit the embed_source command
-            command_id = submit_command(
+            command_id = await async_submit_command(
                 "open_notebook",
                 "embed_source",
                 {"source_id": str(self.id)},
@@ -449,7 +449,7 @@ class Source(ObjectModel):
         try:
             # Submit create_insight command (fire-and-forget)
             # Command handles retries internally for transaction conflicts
-            command_id = submit_command(
+            command_id = await async_submit_command(
                 "open_notebook",
                 "create_insight",
                 {
@@ -570,7 +570,7 @@ class Note(ObjectModel):
 
         # Submit embedding command (fire-and-forget) if note has content
         if self.id and self.content and self.content.strip():
-            command_id = submit_command(
+            command_id = await async_submit_command(
                 "open_notebook",
                 "embed_note",
                 {"note_id": str(self.id)},
@@ -586,7 +586,7 @@ class Note(ObjectModel):
         result = await self.relate("artifact", notebook_id)
         if use_seekdb_for_search() and self.id and self.content and self.content.strip():
             try:
-                submit_command(
+                await async_submit_command(
                     "open_notebook",
                     "sync_seekdb_note_index",
                     {"note_id": str(self.id)},

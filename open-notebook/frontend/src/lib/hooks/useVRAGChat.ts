@@ -71,14 +71,66 @@ function extractEvidenceImages(evidence: VRAGSessionDetail['evidence']): VRAGIma
   return images
 }
 
+function normalizeSessionDag(dag: VRAGSessionDetail['memory_graph']): VRAGDAG {
+  if (!dag) {
+    return EMPTY_DAG
+  }
+
+  const nodes = Array.isArray(dag.nodes) ? dag.nodes.map((rawNode, index) => {
+    const node = rawNode as unknown as Record<string, unknown>
+    return {
+      id: String(node.id || `node-${index}`),
+      type: (node.type || 'search') as VRAGMemoryNode['type'],
+      summary: typeof node.summary === 'string'
+        ? node.summary
+        : typeof node.label === 'string'
+          ? node.label.replace(/^\[[^\]]+\]\s*/, '').trim()
+          : '',
+      parent_ids: Array.isArray(node.parent_ids)
+        ? node.parent_ids.map((parentId) => String(parentId))
+        : [],
+      images: Array.isArray(node.images)
+        ? node.images
+          .filter((image): image is string | number => image !== null && image !== undefined && image !== '')
+          .map((image) => String(image))
+        : [],
+      priority: Number(node.priority || 0),
+      is_useful: Boolean(node.is_useful),
+      key_insight: typeof node.key_insight === 'string'
+        ? node.key_insight
+        : typeof node.summary === 'string'
+          ? node.summary.slice(0, 200)
+          : '',
+    }
+  }) : []
+
+  const edges = Array.isArray(dag.edges) ? dag.edges
+    .map((rawEdge) => {
+      const edge = rawEdge as Record<string, unknown>
+      const source = edge.source || edge.from
+      const target = edge.target || edge.to
+      if (!source || !target) {
+        return null
+      }
+      return {
+        source: String(source),
+        target: String(target),
+        relation: typeof edge.relation === 'string' ? edge.relation : 'depends_on',
+      }
+    })
+    .filter((edge): edge is VRAGDAG['edges'][number] => edge !== null) : []
+
+  return { nodes, edges }
+}
+
 function getRestoredAnswer(sessionData: VRAGSessionDetail): string {
   const metadataAnswer = sessionData.session.metadata?.current_answer
   if (metadataAnswer) {
     return metadataAnswer
   }
 
-  const lastAiMessage = [...sessionData.messages].reverse().find((message) => message.type === 'ai')
-  return lastAiMessage?.content || ''
+  const lastMessage = sessionData.messages.at(-1)
+  return lastMessage?.type === 'ai' ? lastMessage.content : ''
 }
 
 function appendUniqueImages(
@@ -131,6 +183,25 @@ export function useVRAGChat(notebookId: string) {
     autoSelectInitializedRef.current = false
   }, [notebookId])
 
+  const applySessionData = useCallback((sessionData: VRAGSessionDetail) => {
+    const restoredAnswer = getRestoredAnswer(sessionData)
+    const restoredError = sessionData.session.metadata?.last_error || null
+    const restoredComplete = sessionData.session.metadata?.is_complete === true || Boolean(restoredAnswer)
+
+    setMessages(normalizeMessages(sessionData.messages))
+    setDag(normalizeSessionDag(sessionData.memory_graph))
+    setEvidenceImages(extractEvidenceImages(sessionData.evidence))
+    setCurrentAnswer(restoredAnswer)
+    setIsComplete(restoredComplete)
+    setError(restoredError)
+
+    return {
+      restoredAnswer,
+      restoredError,
+      restoredComplete,
+    }
+  }, [])
+
   const { data: sessions = [], isLoading: loadingSessions, refetch: refetchSessions } = useQuery<VRAGSession[]>({
     queryKey: ['vragSessions', notebookId],
     queryFn: () => vragApi.listSessions(notebookId),
@@ -148,15 +219,8 @@ export function useVRAGChat(notebookId: string) {
       return
     }
 
-    setMessages(normalizeMessages(currentSessionData.messages))
-    setDag(currentSessionData.memory_graph || EMPTY_DAG)
-    setEvidenceImages(extractEvidenceImages(currentSessionData.evidence))
-    setCurrentAnswer(getRestoredAnswer(currentSessionData))
-    setIsComplete(Boolean(
-      currentSessionData.session.metadata?.is_complete ?? getRestoredAnswer(currentSessionData)
-    ))
-    setError(currentSessionData.session.metadata?.last_error || null)
-  }, [currentSessionData, isStreaming])
+    applySessionData(currentSessionData)
+  }, [applySessionData, currentSessionData, isStreaming])
 
   useEffect(() => {
     if (autoSelectInitializedRef.current || sessionId || sessions.length === 0) {
@@ -218,6 +282,7 @@ export function useVRAGChat(notebookId: string) {
     let resolvedSessionId = sessionId || null
     let sawComplete = false
     let aiMessageId: string | null = null
+    let restoredLastError: string | null = null
 
     try {
       const response = await vragApi.sendMessage(notebookId, {
@@ -246,7 +311,9 @@ export function useVRAGChat(notebookId: string) {
       const nodesMap = new Map(dag.nodes.map((node) => [node.id, node]))
 
       const handleEvent = (data: VRAGStreamEvent) => {
-        if (data.type === 'dag_update') {
+        const isDagLikeEvent = data.type !== 'complete' && data.type !== 'error'
+
+        if (isDagLikeEvent) {
           if (data.node_id && data.node_type && data.summary) {
             nodesMap.set(data.node_id, {
               id: data.node_id,
@@ -322,8 +389,23 @@ export function useVRAGChat(notebookId: string) {
       )
       tailEvents.forEach(handleEvent)
 
+      if (!sawComplete && resolvedSessionId) {
+        try {
+          const restoredSessionData = await vragApi.getSession(resolvedSessionId)
+          const restoredState = applySessionData(restoredSessionData)
+
+          if (restoredState.restoredError) {
+            restoredLastError = restoredState.restoredError
+          } else if (restoredState.restoredComplete) {
+            sawComplete = true
+          }
+        } catch (restoreError) {
+          console.warn('VRAG stream ended without completion; session restore failed:', restoreError)
+        }
+      }
+
       if (!sawComplete) {
-        throw new Error('VRAG stream ended before completion event')
+        throw new Error(restoredLastError || 'VRAG stream ended before completion event')
       }
     } catch (err: unknown) {
       const streamError = err as DOMException & { message?: string }
@@ -343,7 +425,7 @@ export function useVRAGChat(notebookId: string) {
         await queryClient.invalidateQueries({ queryKey: ['vragSession', resolvedSessionId] })
       }
     }
-  }, [notebookId, sessionId, dag.nodes, queryClient, t])
+  }, [applySessionData, notebookId, sessionId, dag.nodes, queryClient, t])
 
   const cancelStreaming = useCallback(() => {
     abortControllerRef.current?.abort()

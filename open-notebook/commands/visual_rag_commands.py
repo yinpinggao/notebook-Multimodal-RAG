@@ -1,11 +1,17 @@
+import asyncio
 import time
+from pathlib import Path
 from typing import Any, Optional
 
+import fitz
 from loguru import logger
 
-from open_notebook.jobs import CommandInput, CommandOutput, command
+from open_notebook.domain.notebook import Source
+from open_notebook.jobs import CommandInput, CommandOutput, async_submit_command, command
+from open_notebook.seekdb import seekdb_business_store
 from open_notebook.storage.visual_assets import visual_asset_store
 from open_notebook.visual_rag.indexer import VisualAssetIndexer
+from open_notebook.vrag.utils import VISUAL_INDEX_VERSION
 
 
 class IndexVisualSourceInput(CommandInput):
@@ -21,6 +27,52 @@ class IndexVisualSourceOutput(CommandOutput):
     indexing_result: dict[str, Any]
     processing_time: float
     error_message: Optional[str] = None
+
+
+class BackfillVisualIndexesInput(CommandInput):
+    limit: int = 200
+    generate_summaries: bool = False
+    dpi: Optional[int] = None
+
+
+class BackfillVisualIndexesOutput(CommandOutput):
+    success: bool
+    scanned: int
+    queued: int
+    skipped: int
+    command_ids: list[str]
+    processing_time: float
+    error_message: Optional[str] = None
+
+
+def _source_pdf_path(source: Source) -> Optional[Path]:
+    file_path = source.asset.file_path if source.asset else None
+    if not file_path:
+        return None
+    path = Path(file_path)
+    if path.suffix.lower() != ".pdf" or not path.exists():
+        return None
+    return path
+
+
+def _pdf_page_count(pdf_path: Path) -> int:
+    with fitz.open(str(pdf_path)) as doc:
+        return int(doc.page_count or 0)
+
+
+async def _source_needs_visual_rebuild(source_id: str, pdf_path: Path) -> bool:
+    assets = await visual_asset_store.list_assets_by_source(source_id)
+    if not assets:
+        return True
+
+    page_render_pages = {
+        int(asset.get("page_no") or 0)
+        for asset in assets
+        if asset.get("asset_type") == "page_render"
+        and int((asset.get("metadata") or {}).get("index_version") or 0) >= VISUAL_INDEX_VERSION
+    }
+    page_count = await asyncio.to_thread(_pdf_page_count, pdf_path)
+    return len(page_render_pages) < page_count
 
 
 @command(
@@ -82,6 +134,83 @@ async def index_visual_source_command(
             success=False,
             source_id=input_data.source_id,
             indexing_result={"total": 0, "indexed": 0, "skipped": 0, "errors": 1},
+            processing_time=time.time() - start,
+            error_message=str(e),
+        )
+
+
+@command(
+    "backfill_visual_indexes",
+    app="open_notebook",
+    retry={
+        "max_attempts": 2,
+        "wait_strategy": "exponential_jitter",
+        "wait_min": 2,
+        "wait_max": 30,
+        "retry_log_level": "debug",
+    },
+)
+async def backfill_visual_indexes_command(
+    input_data: BackfillVisualIndexesInput,
+) -> BackfillVisualIndexesOutput:
+    start = time.time()
+    command_ids: list[str] = []
+    scanned = 0
+    queued = 0
+    skipped = 0
+
+    try:
+        rows = await seekdb_business_store.list_entities("source")
+        for row in rows:
+            if scanned >= input_data.limit:
+                break
+            source = Source(**row)
+            pdf_path = _source_pdf_path(source)
+            if pdf_path is None or source.id is None:
+                continue
+
+            scanned += 1
+
+            source_id = str(source.id)
+            summary = await visual_asset_store.source_index_summary(source_id)
+            if summary.get("visual_index_status") in {"queued", "running"}:
+                skipped += 1
+                continue
+
+            if not await _source_needs_visual_rebuild(source_id, pdf_path):
+                skipped += 1
+                continue
+
+            command_id = await async_submit_command(
+                "open_notebook",
+                "index_visual_source",
+                {
+                    "source_id": source_id,
+                    "regenerate": True,
+                    "generate_summaries": input_data.generate_summaries,
+                    "dpi": input_data.dpi,
+                },
+            )
+            command_ids.append(command_id)
+            queued += 1
+
+        return BackfillVisualIndexesOutput(
+            success=True,
+            scanned=scanned,
+            queued=queued,
+            skipped=skipped,
+            command_ids=command_ids,
+            processing_time=time.time() - start,
+            error_message=None,
+        )
+    except Exception as e:
+        logger.warning(f"Visual index backfill failed: {e}")
+        return BackfillVisualIndexesOutput(
+            success=False,
+            scanned=scanned,
+            queued=queued,
+            skipped=skipped,
+            command_ids=command_ids,
             processing_time=time.time() - start,
             error_message=str(e),
         )

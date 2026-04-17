@@ -11,7 +11,13 @@ from commands.embedding_commands import (
     embed_note_command,
     embed_source_command,
 )
-from open_notebook.jobs import CommandInput, CommandOutput, command, submit_command
+from open_notebook.jobs import (
+    CommandInput,
+    CommandOutput,
+    async_submit_command,
+    command,
+    submit_command,
+)
 from open_notebook.seekdb import ai_config_store, ai_sync_service, seekdb_business_store
 
 
@@ -176,7 +182,7 @@ async def resync_seekdb_source_scope(
             source_ids = [str(item["id"]) for item in source_rows]
 
         for source_id in source_ids:
-            submit_command(
+            await async_submit_command(
                 "open_notebook",
                 "sync_seekdb_source_pages",
                 {"source_id": source_id},
@@ -207,7 +213,7 @@ async def resync_seekdb_note_scope(
             note_ids = [str(item["id"]) for item in note_rows]
 
         for note_id in note_ids:
-            submit_command(
+            await async_submit_command(
                 "open_notebook",
                 "sync_seekdb_note_index",
                 {"note_id": note_id},
@@ -250,7 +256,7 @@ async def backfill_seekdb_indexes(input_data: BackfillSeekDBInput) -> SeekDBSync
     try:
         credential_rows = await ai_config_store.list_credentials()
         for row in credential_rows:
-            submit_command(
+            await async_submit_command(
                 "open_notebook",
                 "sync_seekdb_credential",
                 {"credential_id": str(row["id"])},
@@ -258,19 +264,19 @@ async def backfill_seekdb_indexes(input_data: BackfillSeekDBInput) -> SeekDBSync
 
         model_rows = await ai_config_store.list_models()
         for row in model_rows:
-            submit_command(
+            await async_submit_command(
                 "open_notebook",
                 "sync_seekdb_model",
                 {"model_id": str(row["id"])},
             )
 
-        submit_command("open_notebook", "sync_seekdb_defaults", {})
+        await async_submit_command("open_notebook", "sync_seekdb_defaults", {})
 
         source_rows = await seekdb_business_store.list_entities("source")
         for row in source_rows:
             if not row.get("full_text"):
                 continue
-            submit_command(
+            await async_submit_command(
                 "open_notebook",
                 "sync_seekdb_source_pages",
                 {"source_id": str(row["id"])},
@@ -280,7 +286,7 @@ async def backfill_seekdb_indexes(input_data: BackfillSeekDBInput) -> SeekDBSync
         for row in note_rows:
             if not row.get("content"):
                 continue
-            submit_command(
+            await async_submit_command(
                 "open_notebook",
                 "sync_seekdb_note_index",
                 {"note_id": str(row["id"])},
@@ -290,7 +296,7 @@ async def backfill_seekdb_indexes(input_data: BackfillSeekDBInput) -> SeekDBSync
         for row in insight_rows:
             if not row.get("content"):
                 continue
-            submit_command(
+            await async_submit_command(
                 "open_notebook",
                 "sync_seekdb_insight_index",
                 {"insight_id": str(row["id"])},

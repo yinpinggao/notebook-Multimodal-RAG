@@ -295,8 +295,9 @@ export interface VRAGDAG {
 }
 
 export interface VRAGStreamEvent {
-  type: 'dag_update' | 'complete' | 'error'
+  type: 'dag_update' | 'complete' | 'error' | 'decision' | 'search' | 'bbox_crop' | 'summarize' | 'answer'
   node?: string
+  update_type?: string
   node_id?: string
   node_type?: string
   summary?: string
@@ -316,6 +317,8 @@ export interface VRAGStreamEvent {
     page_no: number
     score?: number
     summary: string
+    asset_type?: string
+    is_native_image?: boolean
   }>
 }
 
@@ -337,6 +340,8 @@ export interface VRAGImageResult {
   source_id: string
   summary?: string
   bbox?: number[]
+  asset_type?: string
+  is_native_image?: boolean
 }
 
 export interface VRAGTextResult {

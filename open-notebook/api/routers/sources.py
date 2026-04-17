@@ -32,7 +32,7 @@ from open_notebook.config import UPLOADS_FOLDER
 from open_notebook.domain.notebook import Notebook, Source
 from open_notebook.domain.transformation import Transformation
 from open_notebook.exceptions import InvalidInputError
-from open_notebook.jobs import execute_command_sync, submit_command
+from open_notebook.jobs import async_submit_command, execute_command_sync, submit_command
 from open_notebook.seekdb import seekdb_business_store, use_seekdb_for_search
 from open_notebook.storage.visual_assets import visual_asset_store
 
@@ -1024,7 +1024,7 @@ async def create_source_insight(source_id: str, request: CreateSourceInsightRequ
             raise HTTPException(status_code=404, detail="Transformation not found")
 
         # Submit transformation as background job (fire-and-forget)
-        command_id = submit_command(
+        command_id = await async_submit_command(
             "open_notebook",
             "run_transformation",
             {

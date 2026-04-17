@@ -187,35 +187,58 @@ async def run_registered_command_job(*args: Any) -> dict[str, Any]:
         raise
 
 
+async def async_submit_command(
+    app_name: str,
+    command_name: str,
+    command_args: dict[str, Any],
+    *,
+    job_id: Optional[str] = None,
+) -> str:
+    registry.get_command(app_name, command_name)
+    resolved_job_id = job_id or f"command:{uuid4().hex}"
+    await job_store.create_job(
+        app_name,
+        command_name,
+        command_args,
+        job_id=resolved_job_id,
+    )
+    try:
+        await job_queue.enqueue(resolved_job_id, run_registered_command_job)
+    except Exception as exc:
+        await job_store.update_job(
+            resolved_job_id,
+            status="failed",
+            completed_at=job_store.now(),
+            error_message=str(exc),
+        )
+        raise
+    return resolved_job_id
+
+
 def submit_command(app_name: str, command_name: str, command_args: dict[str, Any]) -> str:
     registry.get_command(app_name, command_name)
     job_id = f"command:{uuid4().hex}"
 
-    async def _schedule() -> str:
-        await job_store.create_job(
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(
+            async_submit_command(
+                app_name,
+                command_name,
+                command_args,
+                job_id=job_id,
+            )
+        )
+
+    task = loop.create_task(
+        async_submit_command(
             app_name,
             command_name,
             command_args,
             job_id=job_id,
         )
-        try:
-            await job_queue.enqueue(job_id, run_registered_command_job)
-        except Exception as exc:
-            await job_store.update_job(
-                job_id,
-                status="failed",
-                completed_at=job_store.now(),
-                error_message=str(exc),
-            )
-            raise
-        return job_id
-
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(_schedule())
-
-    task = loop.create_task(_schedule())
+    )
 
     def _log_schedule_failure(fut: asyncio.Future[str]) -> None:
         try:

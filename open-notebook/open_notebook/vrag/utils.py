@@ -16,6 +16,58 @@ logger = logging.getLogger(__name__)
 
 # Image extensions that are supported
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff"}
+VISUAL_INDEX_VERSION = 2
+NATIVE_IMAGE_MIN_AREA_RATIO = 0.0075
+NATIVE_IMAGE_MIN_SIDE_RATIO = 0.05
+NATIVE_IMAGE_MAX_ASPECT_RATIO = 8.0
+NATIVE_IMAGES_PER_PAGE_LIMIT = 8
+
+
+def _page_text(page: fitz.Page) -> str:
+    try:
+        return str(page.get_text("text") or "").strip()
+    except Exception:
+        return ""
+
+
+def _normalized_bbox(rect: fitz.Rect, page_rect: fitz.Rect) -> list[float]:
+    page_width = max(float(page_rect.width or 0.0), 1.0)
+    page_height = max(float(page_rect.height or 0.0), 1.0)
+    x0 = min(max(float(rect.x0) / page_width, 0.0), 1.0)
+    y0 = min(max(float(rect.y0) / page_height, 0.0), 1.0)
+    x1 = min(max(float(rect.x1) / page_width, 0.0), 1.0)
+    y1 = min(max(float(rect.y1) / page_height, 0.0), 1.0)
+    return [x0, y0, x1, y1]
+
+
+def _rect_metrics(rect: fitz.Rect, page_rect: fitz.Rect) -> dict[str, float]:
+    page_width = max(float(page_rect.width or 0.0), 1.0)
+    page_height = max(float(page_rect.height or 0.0), 1.0)
+    rect_width = max(float(rect.width or 0.0), 0.0)
+    rect_height = max(float(rect.height or 0.0), 0.0)
+    area_ratio = (rect_width * rect_height) / (page_width * page_height)
+    width_ratio = rect_width / page_width
+    height_ratio = rect_height / page_height
+    shorter_side = max(min(rect_width, rect_height), 1.0)
+    longer_side = max(rect_width, rect_height)
+    aspect_ratio = longer_side / shorter_side
+    return {
+        "area_ratio": area_ratio,
+        "width_ratio": width_ratio,
+        "height_ratio": height_ratio,
+        "aspect_ratio": aspect_ratio,
+    }
+
+
+def _should_keep_native_rect(rect: fitz.Rect, page_rect: fitz.Rect) -> tuple[bool, dict[str, float]]:
+    metrics = _rect_metrics(rect, page_rect)
+    keep = (
+        metrics["area_ratio"] >= NATIVE_IMAGE_MIN_AREA_RATIO
+        and metrics["width_ratio"] >= NATIVE_IMAGE_MIN_SIDE_RATIO
+        and metrics["height_ratio"] >= NATIVE_IMAGE_MIN_SIDE_RATIO
+        and metrics["aspect_ratio"] <= NATIVE_IMAGE_MAX_ASPECT_RATIO
+    )
+    return keep, metrics
 
 
 def extract_images_from_pdf(
@@ -44,73 +96,136 @@ def extract_images_from_pdf(
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-    for page_no in range(len(doc)):
-        page = doc[page_no]
-        image_list = page.get_images(full=True)
+    try:
+        for page_no in range(len(doc)):
+            page = doc[page_no]
+            page_number = page_no + 1
+            page_rect = page.rect
+            page_text = _page_text(page)
 
-        # Native images in PDF
-        for img_index, img_info in enumerate(image_list):
-            xref = img_info[0]
-            base_image = doc.extract_image(xref)
-            image_bytes = base_image["image"]
-            image_ext = base_image["ext"]
-            image_width = base_image["width"]
-            image_height = base_image["height"]
-
-            if image_width < min_width or image_height < min_height:
-                continue
-
-            if output_dir:
-                image_name = f"page{page_no + 1}_img{img_index}.{image_ext}"
-                image_path = output_path / image_name
-                with open(image_path, "wb") as f:
-                    f.write(image_bytes)
-                image_path_str = str(image_path)
-            else:
-                image_path_str = f"page{page_no + 1}_img{img_index}"
-
-            results.append({
-                "page_no": page_no + 1,
-                "image_index": img_index,
-                "image_path": image_path_str,
-                "image_bytes": image_bytes,
-                "width": image_width,
-                "height": image_height,
-                "is_native_image": True,
-                "format": image_ext,
-            })
-
-        # Rendered page as image (for vector graphics, charts, etc.)
-        if not image_list or len(image_list) == 0:
-            # No native images, render the page
+            # Every page gets a canonical full-page render.
             pix = page.get_pixmap(dpi=dpi)
             width = pix.width
             height = pix.height
+            page_image_bytes = None
 
-            if width < min_width or height < min_height:
-                continue
+            if width >= min_width and height >= min_height:
+                if output_dir:
+                    image_name = f"page{page_number}_rendered.png"
+                    image_path = output_path / image_name
+                    pix.save(str(image_path))
+                    image_path_str = str(image_path)
+                else:
+                    image_path_str = f"page{page_number}_rendered"
+                    page_image_bytes = pix.tobytes("png")
 
-            if output_dir:
-                image_name = f"page{page_no + 1}_rendered.png"
-                image_path = output_path / image_name
-                pix.save(str(image_path))
-                image_path_str = str(image_path)
-            else:
-                image_path_str = f"page{page_no + 1}_rendered"
-                image_bytes = pix.tobytes("png")
+                results.append({
+                    "page_no": page_number,
+                    "image_index": -1,
+                    "asset_type": "page_render",
+                    "image_path": image_path_str,
+                    "image_bytes": page_image_bytes,
+                    "width": width,
+                    "height": height,
+                    "is_native_image": False,
+                    "format": "png",
+                    "raw_text": page_text,
+                    "bbox": [],
+                    "metadata": {
+                        "index_version": VISUAL_INDEX_VERSION,
+                        "page_width": float(page_rect.width or 0.0),
+                        "page_height": float(page_rect.height or 0.0),
+                    },
+                })
 
-            results.append({
-                "page_no": page_no + 1,
-                "image_index": -1,
-                "image_path": image_path_str,
-                "image_bytes": image_bytes,
-                "width": width,
-                "height": height,
-                "is_native_image": False,
-                "format": "png",
-            })
+            native_candidates: list[dict] = []
+            image_list = page.get_images(full=True)
+            for img_index, img_info in enumerate(image_list):
+                xref = img_info[0]
+                try:
+                    base_image = doc.extract_image(xref)
+                except Exception:
+                    continue
 
-    doc.close()
+                image_bytes = base_image.get("image")
+                image_ext = str(base_image.get("ext") or "png")
+                image_width = int(base_image.get("width") or 0)
+                image_height = int(base_image.get("height") or 0)
+                if not image_bytes:
+                    continue
+
+                rects = page.get_image_rects(xref) or []
+                unique_rects: list[fitz.Rect] = []
+                seen_rects: set[tuple[float, float, float, float]] = set()
+                for rect in rects:
+                    rect_key = (
+                        round(float(rect.x0), 2),
+                        round(float(rect.y0), 2),
+                        round(float(rect.x1), 2),
+                        round(float(rect.y1), 2),
+                    )
+                    if rect_key in seen_rects:
+                        continue
+                    seen_rects.add(rect_key)
+                    unique_rects.append(rect)
+
+                if not unique_rects:
+                    continue
+
+                multiple_rects = len(unique_rects) > 1
+                for rect_index, rect in enumerate(unique_rects):
+                    keep, metrics = _should_keep_native_rect(rect, page_rect)
+                    if not keep:
+                        continue
+
+                    if output_dir:
+                        suffix = f"_r{rect_index}" if multiple_rects else ""
+                        image_name = f"page{page_number}_img{img_index}{suffix}.{image_ext}"
+                        image_path = output_path / image_name
+                        image_path.write_bytes(image_bytes)
+                        image_path_str = str(image_path)
+                    else:
+                        suffix = f"_r{rect_index}" if multiple_rects else ""
+                        image_path_str = f"page{page_number}_img{img_index}{suffix}"
+
+                    normalized_bbox = _normalized_bbox(rect, page_rect)
+                    native_candidates.append({
+                        "page_no": page_number,
+                        "image_index": (img_index * 1000) + rect_index,
+                        "asset_type": "native_image",
+                        "image_path": image_path_str,
+                        "image_bytes": image_bytes,
+                        "width": image_width,
+                        "height": image_height,
+                        "is_native_image": True,
+                        "format": image_ext,
+                        "raw_text": page_text,
+                        "bbox": normalized_bbox,
+                        "metadata": {
+                            "index_version": VISUAL_INDEX_VERSION,
+                            "page_width": float(page_rect.width or 0.0),
+                            "page_height": float(page_rect.height or 0.0),
+                            "xref": xref,
+                            "original_image_index": img_index,
+                            "rect_index": rect_index,
+                            "bbox_pixels": [
+                                float(rect.x0),
+                                float(rect.y0),
+                                float(rect.x1),
+                                float(rect.y1),
+                            ],
+                            **metrics,
+                        },
+                    })
+
+            native_candidates.sort(
+                key=lambda item: float(item.get("metadata", {}).get("area_ratio") or 0.0),
+                reverse=True,
+            )
+            results.extend(native_candidates[:NATIVE_IMAGES_PER_PAGE_LIMIT])
+    finally:
+        doc.close()
+
     logger.info(f"Extracted {len(results)} images from PDF: {pdf_path}")
     return results
 

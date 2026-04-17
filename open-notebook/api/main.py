@@ -45,6 +45,7 @@ from open_notebook.exceptions import (
     OpenNotebookError,
     RateLimitError,
 )
+from open_notebook.jobs import async_submit_command
 from open_notebook.seekdb import seekdb_client, seekdb_is_configured
 from open_notebook.utils.encryption import get_secret_from_env
 from open_notebook.visual_rag.api import (
@@ -128,6 +129,24 @@ async def lifespan(app: FastAPI):
                 logger.warning(
                     f"Visual RAG legacy migration skipped or partially failed: {migration_error}"
                 )
+            auto_backfill = os.getenv(
+                "OPEN_NOTEBOOK_AUTO_BACKFILL_VISUAL_INDEXES",
+                "true",
+            ).lower() not in {"0", "false", "no"}
+            if auto_backfill:
+                try:
+                    backfill_command_id = await async_submit_command(
+                        "open_notebook",
+                        "backfill_visual_indexes",
+                        {"generate_summaries": False},
+                    )
+                    logger.info(
+                        f"Queued visual index backfill command: {backfill_command_id}"
+                    )
+                except Exception as backfill_error:
+                    logger.warning(
+                        f"Visual index backfill queueing failed: {backfill_error}"
+                    )
             seekdb_online = await seekdb_client.ping()
             if seekdb_online:
                 logger.info("SeekDB connectivity check succeeded")

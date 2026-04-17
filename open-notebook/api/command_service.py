@@ -2,7 +2,12 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
-from open_notebook.jobs import cancel_command, get_command_status, job_store, submit_command
+from open_notebook.jobs import (
+    async_submit_command,
+    cancel_command,
+    get_command_status,
+    job_store,
+)
 
 
 class CommandService:
@@ -25,7 +30,7 @@ class CommandService:
                 logger.error(f"Failed to import command modules: {import_err}")
                 raise ValueError("Command modules not available")
 
-            cmd_id = submit_command(
+            cmd_id = await async_submit_command(
                 module_name,
                 command_name,
                 command_args,

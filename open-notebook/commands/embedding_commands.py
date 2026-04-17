@@ -7,7 +7,13 @@ from pydantic import BaseModel
 from open_notebook.ai.models import model_manager
 from open_notebook.domain.notebook import Note, Source, SourceInsight
 from open_notebook.exceptions import ConfigurationError
-from open_notebook.jobs import CommandInput, CommandOutput, command, submit_command
+from open_notebook.jobs import (
+    CommandInput,
+    CommandOutput,
+    async_submit_command,
+    command,
+    submit_command,
+)
 from open_notebook.seekdb import (
     ai_index_store,
     ai_page_store,
@@ -648,7 +654,7 @@ async def create_insight_command(
             raise ValueError("Failed to create insight - no ID in result")
 
         # 2. Submit embedding command (fire-and-forget)
-        submit_command(
+        await async_submit_command(
             "open_notebook",
             "embed_insight",
             {"insight_id": insight_id},
@@ -862,7 +868,7 @@ async def rebuild_embeddings_command(
         logger.info(f"\nSubmitting {len(items['sources'])} source embedding jobs...")
         for idx, source_id in enumerate(items["sources"], 1):
             try:
-                submit_command(
+                await async_submit_command(
                     "open_notebook",
                     "embed_source",
                     {"source_id": source_id},
@@ -882,7 +888,7 @@ async def rebuild_embeddings_command(
         logger.info(f"\nSubmitting {len(items['notes'])} note embedding jobs...")
         for idx, note_id in enumerate(items["notes"], 1):
             try:
-                submit_command(
+                await async_submit_command(
                     "open_notebook",
                     "embed_note",
                     {"note_id": note_id},
@@ -902,7 +908,7 @@ async def rebuild_embeddings_command(
         logger.info(f"\nSubmitting {len(items['insights'])} insight embedding jobs...")
         for idx, insight_id in enumerate(items["insights"], 1):
             try:
-                submit_command(
+                await async_submit_command(
                     "open_notebook",
                     "embed_insight",
                     {"insight_id": insight_id},

@@ -278,20 +278,28 @@ class MultimodalMemoryGraph:
         for node in self.nodes.values():
             # Calculate energy for the node
             energy = self.calculate_intuitive_memory_energy(node.id)
+            node_images = [image for image in node.images if image]
 
             nodes.append({
                 "id": node.id,
                 "label": f"[{node.type}]\n{node.summary[:50]}...",
                 "type": node.type,
+                "summary": node.summary,
+                "parent_ids": list(node.parent_ids),
+                "images": node_images,
                 "priority": node.priority,
                 "is_useful": node.is_useful,
+                "key_insight": node.key_insight,
                 "energy": energy,
-                "image_count": len(node.images),
+                "image_count": len(node_images),
                 "created_at": node.created_at,
             })
 
             for parent_id in node.parent_ids:
                 edges.append({
+                    "source": parent_id,
+                    "target": node.id,
+                    "relation": "depends_on",
                     "from": parent_id,
                     "to": node.id,
                 })
