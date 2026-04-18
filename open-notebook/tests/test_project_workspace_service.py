@@ -10,9 +10,11 @@ from api.project_workspace_service import get_project, list_projects
     "api.project_workspace_service.project_os_artifact_service.count_project_artifacts",
     new_callable=AsyncMock,
 )
+@patch("api.project_workspace_service.count_project_memories", new_callable=AsyncMock)
 @patch("api.project_workspace_service.seekdb_business_store.notebook_rows", new_callable=AsyncMock)
 async def test_list_projects_populates_artifact_counts(
     mock_notebook_rows,
+    mock_count_memories,
     mock_count_artifacts,
 ):
     mock_notebook_rows.return_value = [
@@ -36,10 +38,12 @@ async def test_list_projects_populates_artifact_counts(
         },
     ]
     mock_count_artifacts.side_effect = [3, 1]
+    mock_count_memories.side_effect = [2, 0]
 
     projects = await list_projects()
 
     assert [project.artifact_count for project in projects] == [3, 1]
+    assert [project.memory_count for project in projects] == [2, 0]
     assert projects[0].status == "active"
     assert projects[1].status == "archived"
 
@@ -49,9 +53,11 @@ async def test_list_projects_populates_artifact_counts(
     "api.project_workspace_service.project_os_artifact_service.count_project_artifacts",
     new_callable=AsyncMock,
 )
+@patch("api.project_workspace_service.count_project_memories", new_callable=AsyncMock)
 @patch("api.project_workspace_service.seekdb_business_store.notebook_row", new_callable=AsyncMock)
 async def test_get_project_populates_artifact_count(
     mock_notebook_row,
+    mock_count_memories,
     mock_count_artifacts,
 ):
     mock_notebook_row.return_value = {
@@ -64,8 +70,10 @@ async def test_get_project_populates_artifact_count(
         "source_count": 2,
     }
     mock_count_artifacts.return_value = 4
+    mock_count_memories.return_value = 3
 
     project = await get_project("project:demo")
 
     assert project.id == "project:demo"
     assert project.artifact_count == 4
+    assert project.memory_count == 3

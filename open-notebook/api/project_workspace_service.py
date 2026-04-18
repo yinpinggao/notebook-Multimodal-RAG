@@ -4,13 +4,19 @@ import asyncio
 from typing import Optional
 
 from api.schemas import ProjectSummary
+from open_notebook.memory_center import count_project_memories
 from open_notebook.domain.notebook import Notebook
 from open_notebook.exceptions import NotFoundError
 from open_notebook.project_os import artifact_service as project_os_artifact_service
 from open_notebook.seekdb import seekdb_business_store
 
 
-def _row_to_project_summary(row: dict, *, artifact_count: int = 0) -> ProjectSummary:
+def _row_to_project_summary(
+    row: dict,
+    *,
+    artifact_count: int = 0,
+    memory_count: int = 0,
+) -> ProjectSummary:
     archived = bool(row.get("archived", False))
     return ProjectSummary(
         id=str(row.get("id", "")),
@@ -21,7 +27,7 @@ def _row_to_project_summary(row: dict, *, artifact_count: int = 0) -> ProjectSum
         updated_at=str(row.get("updated", "")),
         source_count=int(row.get("source_count") or 0),
         artifact_count=artifact_count,
-        memory_count=0,
+        memory_count=memory_count,
         last_run_at=None,
     )
 
@@ -30,6 +36,7 @@ def _notebook_to_project_summary(
     notebook: Notebook,
     *,
     artifact_count: int = 0,
+    memory_count: int = 0,
 ) -> ProjectSummary:
     return ProjectSummary(
         id=str(notebook.id or ""),
@@ -40,7 +47,7 @@ def _notebook_to_project_summary(
         updated_at=str(notebook.updated or ""),
         source_count=0,
         artifact_count=artifact_count,
-        memory_count=0,
+        memory_count=memory_count,
         last_run_at=None,
     )
 
@@ -49,6 +56,12 @@ async def _artifact_count_for_project(project_id: str) -> int:
     if not project_id:
         return 0
     return await project_os_artifact_service.count_project_artifacts(project_id)
+
+
+async def _memory_count_for_project(project_id: str) -> int:
+    if not project_id:
+        return 0
+    return await count_project_memories(project_id)
 
 
 async def list_projects(
@@ -63,9 +76,21 @@ async def list_projects(
     artifact_counts = await asyncio.gather(
         *[_artifact_count_for_project(str(row.get("id", ""))) for row in rows]
     )
+    memory_counts = await asyncio.gather(
+        *[_memory_count_for_project(str(row.get("id", ""))) for row in rows]
+    )
     return [
-        _row_to_project_summary(row, artifact_count=artifact_count)
-        for row, artifact_count in zip(rows, artifact_counts, strict=False)
+        _row_to_project_summary(
+            row,
+            artifact_count=artifact_count,
+            memory_count=memory_count,
+        )
+        for row, artifact_count, memory_count in zip(
+            rows,
+            artifact_counts,
+            memory_counts,
+            strict=False,
+        )
     ]
 
 
@@ -74,8 +99,15 @@ async def get_project(project_id: str) -> ProjectSummary:
     if not row:
         raise NotFoundError("Project not found")
 
-    artifact_count = await _artifact_count_for_project(project_id)
-    return _row_to_project_summary(row, artifact_count=artifact_count)
+    artifact_count, memory_count = await asyncio.gather(
+        _artifact_count_for_project(project_id),
+        _memory_count_for_project(project_id),
+    )
+    return _row_to_project_summary(
+        row,
+        artifact_count=artifact_count,
+        memory_count=memory_count,
+    )
 
 
 async def create_project(name: str, description: str = "") -> ProjectSummary:

@@ -84,6 +84,50 @@ export interface MemoryUpdatePreviewResponse {
   confidence?: number | null
 }
 
+export interface SourceReferenceResponse {
+  source_id: string
+  source_name?: string | null
+  page_no?: number | null
+  internal_ref: string
+  citation_text?: string | null
+}
+
+export type MemoryScope = 'project' | 'user'
+export type MemoryType = 'fact' | 'term' | 'decision' | 'risk' | 'preference' | 'question'
+export type MemoryStatus = 'draft' | 'accepted' | 'frozen' | 'deprecated'
+export type MemoryDecayPolicy = 'strong' | 'normal' | 'weak'
+
+export interface MemoryRecordResponse {
+  id: string
+  scope: MemoryScope
+  type: MemoryType
+  text: string
+  confidence: number
+  freshness?: string | null
+  source_refs: SourceReferenceResponse[]
+  status: MemoryStatus
+  decay_policy: MemoryDecayPolicy
+  conflict_group?: string | null
+}
+
+export interface ProjectMemoryUpdateRequest {
+  text?: string
+  status?: MemoryStatus
+}
+
+export interface ProjectMemoryDeleteResponse {
+  project_id: string
+  memory_id: string
+  status: 'deleted'
+}
+
+export interface ProjectMemoryRebuildResponse {
+  project_id: string
+  status: string
+  message: string
+  command_id?: string | null
+}
+
 export interface ProjectAskResponse {
   thread_id?: string | null
   answer: string

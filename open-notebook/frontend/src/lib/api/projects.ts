@@ -4,6 +4,7 @@ import {
   CreateProjectRequest,
   EvidenceThreadDetailResponse,
   EvidenceThreadSummaryResponse,
+  MemoryRecordResponse,
   ProjectArtifactCreateResponse,
   ProjectArtifactRequest,
   ProjectCompareCreateResponse,
@@ -12,6 +13,9 @@ import {
   ProjectCompareRequest,
   ProjectAskRequest,
   ProjectAskResponse,
+  ProjectMemoryDeleteResponse,
+  ProjectMemoryRebuildResponse,
+  ProjectMemoryUpdateRequest,
   ProjectFollowupRequest,
   ProjectDeleteResponse,
   ProjectOverviewRebuildResponse,
@@ -37,6 +41,33 @@ export const projectsApi = {
 
   getOverview: async (id: string) => {
     const response = await apiClient.get<ProjectOverviewResponse>(`/projects/${id}/overview`)
+    return response.data
+  },
+
+  listMemory: async (id: string) => {
+    const response = await apiClient.get<MemoryRecordResponse[]>(`/projects/${id}/memory`)
+    return response.data
+  },
+
+  updateMemory: async (id: string, memoryId: string, data: ProjectMemoryUpdateRequest) => {
+    const response = await apiClient.patch<MemoryRecordResponse>(
+      `/projects/${id}/memory/${encodeURIComponent(memoryId)}`,
+      data
+    )
+    return response.data
+  },
+
+  deleteMemory: async (id: string, memoryId: string) => {
+    const response = await apiClient.delete<ProjectMemoryDeleteResponse>(
+      `/projects/${id}/memory/${encodeURIComponent(memoryId)}`
+    )
+    return response.data
+  },
+
+  rebuildMemory: async (id: string) => {
+    const response = await apiClient.post<ProjectMemoryRebuildResponse>(
+      `/projects/${id}/memory/rebuild`
+    )
     return response.data
   },
 
