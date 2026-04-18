@@ -26,6 +26,7 @@ from api.routers import (
     notebooks,
     notes,
     podcasts,
+    project_compare,
     project_evidence,
     projects,
     search,
@@ -52,7 +53,11 @@ from open_notebook.seekdb import seekdb_client, seekdb_is_configured
 from open_notebook.utils.encryption import get_secret_from_env
 from open_notebook.visual_rag.api import (
     asset_router as visual_asset_router,
+)
+from open_notebook.visual_rag.api import (
     legacy_router as vrag_legacy_router,
+)
+from open_notebook.visual_rag.api import (
     router as visual_rag_router,
 )
 
@@ -311,6 +316,7 @@ app.include_router(auth.router, prefix="/api", tags=["auth"])
 app.include_router(config.router, prefix="/api", tags=["config"])
 app.include_router(notebooks.router, prefix="/api", tags=["notebooks"])
 app.include_router(projects.router, prefix="/api", tags=["projects"])
+app.include_router(project_compare.router, prefix="/api", tags=["project-compare"])
 app.include_router(project_evidence.router, prefix="/api", tags=["project-evidence"])
 app.include_router(search.router, prefix="/api", tags=["search"])
 app.include_router(models.router, prefix="/api", tags=["models"])

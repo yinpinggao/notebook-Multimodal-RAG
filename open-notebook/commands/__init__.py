@@ -1,5 +1,6 @@
 """seekdb-commands integration for Open Notebook"""
 
+from .compare_commands import compare_sources_command
 from .embedding_commands import (
     embed_insight_command,
     embed_note_command,
@@ -37,6 +38,7 @@ __all__ = [
     "process_text_command",
     "analyze_data_command",
     "build_project_overview_command",
+    "compare_sources_command",
     # SeekDB sync commands
     "sync_seekdb_credential",
     "sync_seekdb_model",

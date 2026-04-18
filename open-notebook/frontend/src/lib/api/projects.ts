@@ -3,6 +3,10 @@ import {
   CreateProjectRequest,
   EvidenceThreadDetailResponse,
   EvidenceThreadSummaryResponse,
+  ProjectCompareCreateResponse,
+  ProjectCompareExportResponse,
+  ProjectCompareRecordResponse,
+  ProjectCompareRequest,
   ProjectAskRequest,
   ProjectAskResponse,
   ProjectFollowupRequest,
@@ -30,6 +34,25 @@ export const projectsApi = {
 
   getOverview: async (id: string) => {
     const response = await apiClient.get<ProjectOverviewResponse>(`/projects/${id}/overview`)
+    return response.data
+  },
+
+  compare: async (id: string, data: ProjectCompareRequest) => {
+    const response = await apiClient.post<ProjectCompareCreateResponse>(`/projects/${id}/compare`, data)
+    return response.data
+  },
+
+  getCompare: async (id: string, compareId: string) => {
+    const response = await apiClient.get<ProjectCompareRecordResponse>(
+      `/projects/${id}/compare/${encodeURIComponent(compareId)}`
+    )
+    return response.data
+  },
+
+  exportCompare: async (id: string, compareId: string) => {
+    const response = await apiClient.post<ProjectCompareExportResponse>(
+      `/projects/${id}/compare/${encodeURIComponent(compareId)}/export`
+    )
     return response.data
   },
 

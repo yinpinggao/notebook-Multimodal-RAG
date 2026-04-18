@@ -6,14 +6,19 @@ implementations yet.
 """
 
 from open_notebook.domain.artifacts import ArtifactRecord
+from open_notebook.domain.compare import (
+    ProjectCompareCreateResponse,
+    ProjectCompareExportResponse,
+    ProjectCompareRecord,
+)
 from open_notebook.domain.evidence import (
     AskResponse,
     CompareItem,
     CompareSummary,
+    EvidenceCard,
     EvidenceThreadDetail,
     EvidenceThreadMessage,
     EvidenceThreadSummary,
-    EvidenceCard,
     MemoryUpdatePreview,
 )
 from open_notebook.domain.memory import MemoryRecord, SourceReference
@@ -28,6 +33,9 @@ from open_notebook.domain.runs import AgentRun, AgentStep
 
 __all__ = [
     "ArtifactRecord",
+    "ProjectCompareCreateResponse",
+    "ProjectCompareExportResponse",
+    "ProjectCompareRecord",
     "AskResponse",
     "CompareItem",
     "CompareSummary",

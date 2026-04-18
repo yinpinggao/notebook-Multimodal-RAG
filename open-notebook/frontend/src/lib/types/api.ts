@@ -149,6 +149,58 @@ export interface ProjectOverviewRebuildResponse {
   command_id?: string | null
 }
 
+export type ProjectCompareMode = 'general' | 'requirements' | 'risks' | 'timeline'
+export type ProjectCompareStatus = 'queued' | 'running' | 'completed' | 'failed'
+
+export interface CompareItemResponse {
+  title: string
+  detail: string
+  source_refs: string[]
+}
+
+export interface CompareSummaryResponse {
+  summary: string
+  similarities: CompareItemResponse[]
+  differences: CompareItemResponse[]
+  conflicts: CompareItemResponse[]
+  missing_items: CompareItemResponse[]
+  human_review_required: CompareItemResponse[]
+}
+
+export interface ProjectCompareRequest {
+  source_a_id: string
+  source_b_id: string
+  compare_mode?: ProjectCompareMode
+}
+
+export interface ProjectCompareCreateResponse {
+  compare_id: string
+  status: ProjectCompareStatus
+  command_id?: string | null
+}
+
+export interface ProjectCompareRecordResponse {
+  id: string
+  project_id: string
+  compare_mode: ProjectCompareMode
+  source_a_id: string
+  source_b_id: string
+  source_a_title: string
+  source_b_title: string
+  status: ProjectCompareStatus
+  command_id?: string | null
+  error_message?: string | null
+  created_at: string
+  updated_at: string
+  result?: CompareSummaryResponse | null
+}
+
+export interface ProjectCompareExportResponse {
+  compare_id: string
+  format: 'markdown'
+  content: string
+}
+
 export interface NoteResponse {
   id: string
   title: string | null
