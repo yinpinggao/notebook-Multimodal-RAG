@@ -9,6 +9,77 @@ export interface NotebookResponse {
   note_count: number
 }
 
+export interface ProjectSummaryResponse {
+  id: string
+  name: string
+  description: string
+  status: 'active' | 'archived'
+  created_at: string
+  updated_at: string
+  source_count: number
+  artifact_count: number
+  memory_count: number
+  last_run_at?: string | null
+}
+
+export interface ProjectTimelineEventResponse {
+  id: string
+  title: string
+  description: string
+  occurred_at?: string | null
+  source_refs: string[]
+}
+
+export interface RecentRunSummaryResponse {
+  id: string
+  status: string
+  run_type: string
+  created_at: string
+  completed_at?: string | null
+}
+
+export interface RecentArtifactSummaryResponse {
+  id: string
+  title: string
+  artifact_type: string
+  created_at: string
+  created_by_run_id?: string | null
+}
+
+export interface ProjectOverviewResponse {
+  project: ProjectSummaryResponse
+  source_count: number
+  artifact_count: number
+  memory_count: number
+  topics: string[]
+  keywords: string[]
+  risks: string[]
+  timeline_events: ProjectTimelineEventResponse[]
+  recommended_questions: string[]
+  recent_runs: RecentRunSummaryResponse[]
+  recent_artifacts: RecentArtifactSummaryResponse[]
+}
+
+export interface CreateProjectRequest {
+  name: string
+  description?: string
+}
+
+export interface ProjectDeleteResponse {
+  message: string
+  project_id: string
+  deleted_notes: number
+  deleted_sources: number
+  unlinked_sources: number
+}
+
+export interface ProjectOverviewRebuildResponse {
+  project_id: string
+  status: string
+  message: string
+  command_id?: string | null
+}
+
 export interface NoteResponse {
   id: string
   title: string | null

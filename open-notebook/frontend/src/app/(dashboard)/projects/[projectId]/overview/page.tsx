@@ -3,43 +3,72 @@
 import Link from 'next/link'
 import { useMemo } from 'react'
 import { useParams } from 'next/navigation'
-import { Activity, Boxes, FileOutput, MessageSquareQuote } from 'lucide-react'
+import { Activity, AlertCircle, Boxes, FileOutput, MessageSquareQuote } from 'lucide-react'
 
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { ProjectOverviewHeader } from '@/components/projects/project-overview-header'
 import { RiskListCard } from '@/components/projects/risk-list-card'
 import { TimelineCard } from '@/components/projects/timeline-card'
 import { TopicClusterCard } from '@/components/projects/topic-cluster-card'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useProjectOverview } from '@/lib/hooks/use-projects'
 import { useNotebook } from '@/lib/hooks/use-notebooks'
 import { useNotebookSources } from '@/lib/hooks/use-sources'
 import {
-  buildProjectOverviewViewModel,
+  buildProjectOverviewFromResponse,
   formatProjectTimestamp,
 } from '@/lib/project-workspace'
 import { projectIdToNotebookId } from '@/lib/project-alias'
+import { formatApiError } from '@/lib/utils/error-handler'
 
 export default function ProjectOverviewPage() {
   const params = useParams()
-  const projectId = params?.projectId ? String(params.projectId) : ''
-  const notebookId = projectIdToNotebookId(projectId)
-  const { data: notebook, isLoading: notebookLoading } = useNotebook(notebookId)
-  const { sources, isLoading: sourcesLoading } = useNotebookSources(notebookId)
+  const routeProjectId = params?.projectId ? String(params.projectId) : ''
+  const projectId = projectIdToNotebookId(routeProjectId)
+  const notebookId = projectId
+  const {
+    data: overviewResponse,
+    isLoading: overviewLoading,
+    error: overviewError,
+  } = useProjectOverview(projectId)
+  const { data: notebook } = useNotebook(notebookId)
+  const {
+    sources,
+    isLoading: sourcesLoading,
+    error: sourcesError,
+  } = useNotebookSources(notebookId)
 
   const overview = useMemo(() => {
-    if (!notebook) {
+    if (!overviewResponse) {
       return null
     }
 
-    return buildProjectOverviewViewModel({
-      notebook,
+    return buildProjectOverviewFromResponse({
+      overview: overviewResponse,
       sources,
+      noteCount: notebook?.note_count,
     })
-  }, [notebook, sources])
+  }, [notebook?.note_count, overviewResponse, sources])
 
-  if (notebookLoading || !overview || (sourcesLoading && !sources.length)) {
+  if (overviewError) {
+    return (
+      <Alert variant="destructive">
+        <AlertCircle className="h-4 w-4" />
+        <AlertTitle>项目总览暂时加载失败</AlertTitle>
+        <AlertDescription className="space-y-3">
+          <p>{formatApiError(overviewError)}</p>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/projects">返回项目列表</Link>
+          </Button>
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
+  if (overviewLoading || !overview) {
     return (
       <div className="flex min-h-[24rem] items-center justify-center rounded-lg border border-dashed border-border/70">
         <LoadingSpinner size="lg" />
@@ -189,7 +218,17 @@ export default function ProjectOverviewPage() {
           </CardHeader>
 
         <CardContent>
-          {sources.length === 0 ? (
+          {sourcesLoading && overview.sourceCount > 0 ? (
+            <div className="flex min-h-40 items-center justify-center rounded-md border border-dashed border-border/70">
+              <LoadingSpinner size="sm" />
+            </div>
+          ) : sourcesError && overview.sourceCount > 0 ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>资料快照暂时加载失败</AlertTitle>
+              <AlertDescription>{formatApiError(sourcesError)}</AlertDescription>
+            </Alert>
+          ) : sources.length === 0 ? (
             <div className="rounded-md border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
               还没有资料进入这个项目空间。先导入论文、规则文档、PPT 或截图，再回来生成项目画像。
             </div>

@@ -22,6 +22,7 @@ export function ProjectOverviewHeader({
   stats,
 }: ProjectOverviewHeaderProps) {
   const projectHref = `/projects/${encodeURIComponent(project.id)}`
+  const noteCountLabel = stats.noteCount ?? '--'
 
   return (
     <Card className="border-border/70">
@@ -82,7 +83,7 @@ export function ProjectOverviewHeader({
               <FileText className="h-3.5 w-3.5" />
               项目笔记
             </div>
-            <div className="mt-2 text-2xl font-semibold">{stats.noteCount}</div>
+            <div className="mt-2 text-2xl font-semibold">{noteCountLabel}</div>
           </div>
 
           <div className="rounded-md border border-border/70 p-4">

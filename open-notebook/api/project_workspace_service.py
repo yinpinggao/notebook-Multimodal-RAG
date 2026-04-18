@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+from typing import Optional
+
+from api.schemas import ProjectSummary
+from open_notebook.domain.notebook import Notebook
+from open_notebook.exceptions import NotFoundError
+from open_notebook.seekdb import seekdb_business_store
+
+
+def _row_to_project_summary(row: dict) -> ProjectSummary:
+    archived = bool(row.get("archived", False))
+    return ProjectSummary(
+        id=str(row.get("id", "")),
+        name=row.get("name", ""),
+        description=row.get("description") or "",
+        status="archived" if archived else "active",
+        created_at=str(row.get("created", "")),
+        updated_at=str(row.get("updated", "")),
+        source_count=int(row.get("source_count") or 0),
+        artifact_count=0,
+        memory_count=0,
+        last_run_at=None,
+    )
+
+
+def _notebook_to_project_summary(notebook: Notebook) -> ProjectSummary:
+    return ProjectSummary(
+        id=str(notebook.id or ""),
+        name=notebook.name,
+        description=notebook.description or "",
+        status="archived" if notebook.archived else "active",
+        created_at=str(notebook.created or ""),
+        updated_at=str(notebook.updated or ""),
+        source_count=0,
+        artifact_count=0,
+        memory_count=0,
+        last_run_at=None,
+    )
+
+
+async def list_projects(
+    archived: Optional[bool] = None,
+    order_by: str = "updated desc",
+) -> list[ProjectSummary]:
+    rows = await seekdb_business_store.notebook_rows(order_by=order_by)
+
+    if archived is not None:
+        rows = [row for row in rows if bool(row.get("archived", False)) == archived]
+
+    return [_row_to_project_summary(row) for row in rows]
+
+
+async def get_project(project_id: str) -> ProjectSummary:
+    row = await seekdb_business_store.notebook_row(project_id)
+    if not row:
+        raise NotFoundError("Project not found")
+
+    return _row_to_project_summary(row)
+
+
+async def create_project(name: str, description: str = "") -> ProjectSummary:
+    notebook = Notebook(
+        name=name,
+        description=description,
+    )
+    await notebook.save()
+
+    if notebook.id:
+        row = await seekdb_business_store.notebook_row(str(notebook.id))
+        if row:
+            return _row_to_project_summary(row)
+
+    return _notebook_to_project_summary(notebook)
+
+
+async def delete_project(
+    project_id: str,
+    delete_exclusive_sources: bool = False,
+) -> dict[str, int | str]:
+    notebook = await Notebook.get(project_id)
+    if not notebook:
+        raise NotFoundError("Project not found")
+
+    result = await notebook.delete(delete_exclusive_sources=delete_exclusive_sources)
+
+    return {
+        "project_id": project_id,
+        **result,
+    }

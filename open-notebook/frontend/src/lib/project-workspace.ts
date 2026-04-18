@@ -1,5 +1,11 @@
-import { NotebookResponse, SourceListResponse } from '@/lib/types/api'
-import { notebookIdToProjectId } from '@/lib/project-alias'
+import {
+  NotebookResponse,
+  ProjectOverviewResponse,
+  ProjectSummaryResponse,
+  ProjectTimelineEventResponse,
+  SourceListResponse,
+} from '@/lib/types/api'
+import { notebookIdToProjectId, projectIdToNotebookId } from '@/lib/project-alias'
 
 export interface ProjectWorkspaceSummary {
   id: string
@@ -10,7 +16,7 @@ export interface ProjectWorkspaceSummary {
   createdAt: string
   updatedAt: string
   sourceCount: number
-  noteCount: number
+  noteCount: number | null
   artifactCount: number
   memoryCount: number
 }
@@ -24,7 +30,7 @@ export interface ProjectTimelineEvent {
 }
 
 export interface ProjectOverviewStats {
-  noteCount: number
+  noteCount: number | null
   embeddedSourceCount: number
   visualReadyCount: number
   insightCount: number
@@ -104,7 +110,9 @@ function buildRiskList(params: {
 }
 
 function buildTimelineEvents(params: {
-  notebook: NotebookResponse
+  projectId: string
+  createdAt: string
+  updatedAt: string
   sources: SourceListResponse[]
   processingSourceCount: number
 }): ProjectTimelineEvent[] {
@@ -114,17 +122,17 @@ function buildTimelineEvents(params: {
 
   const timeline: ProjectTimelineEvent[] = [
     {
-      id: `timeline:${params.notebook.id}:created`,
+      id: `timeline:${params.projectId}:created`,
       title: '创建项目空间',
       description: '项目工作台已经建立，可以开始整理资料和沉淀证据。',
-      occurredAt: params.notebook.created,
+      occurredAt: params.createdAt,
       sourceRefs: [],
     },
   ]
 
   if (latestSource) {
     timeline.unshift({
-      id: `timeline:${params.notebook.id}:source:${latestSource.id}`,
+      id: `timeline:${params.projectId}:source:${latestSource.id}`,
       title: '最近整理资料',
       description: `${latestSource.title || '未命名资料'} 最近被更新，可继续补充主题和证据。`,
       occurredAt: latestSource.updated,
@@ -134,10 +142,10 @@ function buildTimelineEvents(params: {
 
   if (params.processingSourceCount > 0) {
     timeline.unshift({
-      id: `timeline:${params.notebook.id}:processing`,
+      id: `timeline:${params.projectId}:processing`,
       title: '资料处理中',
       description: `${params.processingSourceCount} 份资料仍在建立索引，稍后适合重新生成项目画像。`,
-      occurredAt: params.notebook.updated,
+      occurredAt: params.updatedAt,
       sourceRefs: [],
     })
   }
@@ -200,12 +208,28 @@ export function toProjectWorkspaceSummary(
   }
 }
 
-export function buildProjectOverviewViewModel(params: {
-  notebook: NotebookResponse
-  sources?: SourceListResponse[]
-}): ProjectOverviewViewModel {
-  const sources = params.sources ?? []
-  const project = toProjectWorkspaceSummary(params.notebook)
+export function projectSummaryToWorkspaceSummary(
+  project: ProjectSummaryResponse,
+  options?: {
+    noteCount?: number
+  }
+): ProjectWorkspaceSummary {
+  return {
+    id: project.id,
+    notebookId: projectIdToNotebookId(project.id),
+    name: project.name,
+    description: project.description,
+    status: project.status,
+    createdAt: project.created_at,
+    updatedAt: project.updated_at,
+    sourceCount: project.source_count,
+    noteCount: options?.noteCount ?? null,
+    artifactCount: project.artifact_count,
+    memoryCount: project.memory_count,
+  }
+}
+
+function collectSourceStats(sources: SourceListResponse[]) {
   const processingSourceCount = sources.filter((source) =>
     ['new', 'queued', 'running'].includes(source.status || '')
   ).length
@@ -217,15 +241,62 @@ export function buildProjectOverviewViewModel(params: {
     (total, source) => total + (source.insights_count || 0),
     0
   )
+
+  return {
+    processingSourceCount,
+    embeddedSourceCount,
+    visualReadyCount,
+    insightCount,
+  }
+}
+
+function buildFallbackKeywords(params: {
+  topics: string[]
+  embeddedSourceCount: number
+  visualReadyCount: number
+  sourceCount: number
+}) {
+  return dedupeStrings([
+    ...params.topics,
+    params.embeddedSourceCount > 0 ? '文本检索' : null,
+    params.visualReadyCount > 0 ? '视觉证据' : null,
+    params.sourceCount > 0 ? '项目画像' : null,
+  ]).slice(0, 8)
+}
+
+function mapTimelineEvents(
+  events: ProjectTimelineEventResponse[]
+): ProjectTimelineEvent[] {
+  return events.map((event) => ({
+    id: event.id,
+    title: event.title,
+    description: event.description,
+    occurredAt: event.occurred_at,
+    sourceRefs: event.source_refs,
+  }))
+}
+
+export function buildProjectOverviewViewModel(params: {
+  notebook: NotebookResponse
+  sources?: SourceListResponse[]
+}): ProjectOverviewViewModel {
+  const sources = params.sources ?? []
+  const project = toProjectWorkspaceSummary(params.notebook)
+  const {
+    processingSourceCount,
+    embeddedSourceCount,
+    visualReadyCount,
+    insightCount,
+  } = collectSourceStats(sources)
   const rawTopics = sources.flatMap((source) => source.topics || [])
   const topics = dedupeStrings(rawTopics).slice(0, 6)
   const effectiveTopics = topics.length > 0 ? topics : DEFAULT_TOPICS
-  const keywords = dedupeStrings([
-    ...effectiveTopics,
-    embeddedSourceCount > 0 ? '文本检索' : null,
-    visualReadyCount > 0 ? '视觉证据' : null,
-    params.notebook.source_count > 0 ? '项目画像' : null,
-  ]).slice(0, 8)
+  const keywords = buildFallbackKeywords({
+    topics: effectiveTopics,
+    embeddedSourceCount,
+    visualReadyCount,
+    sourceCount: params.notebook.source_count,
+  })
 
   return {
     project,
@@ -241,7 +312,9 @@ export function buildProjectOverviewViewModel(params: {
       processingSourceCount,
     }),
     timelineEvents: buildTimelineEvents({
-      notebook: params.notebook,
+      projectId: project.id,
+      createdAt: params.notebook.created,
+      updatedAt: params.notebook.updated,
       sources,
       processingSourceCount,
     }),
@@ -253,6 +326,84 @@ export function buildProjectOverviewViewModel(params: {
     recentRuns: [],
     stats: {
       noteCount: project.noteCount,
+      embeddedSourceCount,
+      visualReadyCount,
+      insightCount,
+    },
+  }
+}
+
+export function buildProjectOverviewFromResponse(params: {
+  overview: ProjectOverviewResponse
+  sources?: SourceListResponse[]
+  noteCount?: number
+}): ProjectOverviewViewModel {
+  const sources = params.sources ?? []
+  const project = projectSummaryToWorkspaceSummary(params.overview.project, {
+    noteCount: params.noteCount,
+  })
+  const {
+    processingSourceCount,
+    embeddedSourceCount,
+    visualReadyCount,
+    insightCount,
+  } = collectSourceStats(sources)
+  const effectiveTopics =
+    params.overview.topics.length > 0 ? params.overview.topics : DEFAULT_TOPICS
+  const keywords =
+    params.overview.keywords.length > 0
+      ? params.overview.keywords
+      : buildFallbackKeywords({
+          topics: effectiveTopics,
+          embeddedSourceCount,
+          visualReadyCount,
+          sourceCount: params.overview.source_count,
+        })
+
+  return {
+    project,
+    sourceCount: params.overview.source_count,
+    artifactCount: params.overview.artifact_count,
+    memoryCount: params.overview.memory_count,
+    topics: effectiveTopics,
+    keywords,
+    risks:
+      params.overview.risks.length > 0
+        ? params.overview.risks
+        : buildRiskList({
+            sourceCount: params.overview.source_count,
+            embeddedSourceCount,
+            visualReadyCount,
+            processingSourceCount,
+          }),
+    timelineEvents:
+      params.overview.timeline_events.length > 0
+        ? mapTimelineEvents(params.overview.timeline_events)
+        : buildTimelineEvents({
+            projectId: project.id,
+            createdAt: params.overview.project.created_at,
+            updatedAt: params.overview.project.updated_at,
+            sources,
+            processingSourceCount,
+          }),
+    recommendedQuestions:
+      params.overview.recommended_questions.length > 0
+        ? params.overview.recommended_questions
+        : buildRecommendedQuestions(effectiveTopics, params.overview.source_count > 0),
+    recentArtifacts: params.overview.recent_artifacts.map((artifact) => ({
+      id: artifact.id,
+      title: artifact.title,
+      artifactType: artifact.artifact_type,
+      createdAt: artifact.created_at,
+    })),
+    recentRuns: params.overview.recent_runs.map((run) => ({
+      id: run.id,
+      runType: run.run_type,
+      status: run.status,
+      createdAt: run.created_at,
+    })),
+    stats: {
+      noteCount: params.noteCount ?? null,
       embeddedSourceCount,
       visualReadyCount,
       insightCount,

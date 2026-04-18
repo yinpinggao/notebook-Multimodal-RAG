@@ -151,6 +151,7 @@ export function useCreateSource() {
         queryKey: QUERY_KEYS.sources(),
         refetchType: 'active'
       })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.projects })
 
       // Show different messages based on processing mode
       if (variables.async_processing) {
@@ -187,6 +188,7 @@ export function useUpdateSource() {
       // Invalidate ALL sources queries (both general and notebook-specific)
       queryClient.invalidateQueries({ queryKey: ['sources'] })
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.source(id) })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.projects })
       toast({
         title: t.common.success,
         description: t.sources.sourceUpdatedSuccess,
@@ -214,6 +216,7 @@ export function useDeleteSource() {
       queryClient.invalidateQueries({ queryKey: ['sources'] })
       // Also invalidate the specific source
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.source(id) })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.projects })
       toast({
         title: t.common.success,
         description: t.sources.sourceDeletedSuccess,
@@ -241,6 +244,7 @@ export function useFileUpload() {
       queryClient.invalidateQueries({ 
         queryKey: QUERY_KEYS.sources(variables.notebookId) 
       })
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.projects })
       toast({
         title: t.common.success,
         description: t.sources.fileUploadedSuccess,

@@ -24,6 +24,8 @@ export function ProjectCard({
   eyebrow = '项目空间',
   ctaLabel = '进入项目',
 }: ProjectCardProps) {
+  const noteCountLabel = project.noteCount ?? '--'
+
   return (
     <Card className="flex h-full flex-col justify-between border-border/70">
       <CardHeader className="space-y-4 pb-4">
@@ -57,7 +59,7 @@ export function ProjectCard({
               <ScrollText className="h-3.5 w-3.5" />
               笔记
             </div>
-            <div className="mt-2 text-lg font-semibold">{project.noteCount}</div>
+            <div className="mt-2 text-lg font-semibold">{noteCountLabel}</div>
           </div>
 
           <div className="rounded-md border border-border/70 p-3">

@@ -1,21 +1,23 @@
 'use client'
 
 import Link from 'next/link'
-import { Compass, FolderOpenDot, History, Sparkles } from 'lucide-react'
+import { AlertCircle, Compass, FolderOpenDot, History, Sparkles } from 'lucide-react'
 
 import { EmptyState } from '@/components/common/EmptyState'
 import { LoadingSpinner } from '@/components/common/LoadingSpinner'
 import { AppShell } from '@/components/layout/AppShell'
 import { ProjectCard } from '@/components/projects/project-card'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useCreateDialogs } from '@/lib/hooks/use-create-dialogs'
-import { useNotebooks } from '@/lib/hooks/use-notebooks'
+import { useProjects } from '@/lib/hooks/use-projects'
+import { formatApiError } from '@/lib/utils/error-handler'
 import {
   ProjectWorkspaceSummary,
   formatProjectTimestamp,
-  toProjectWorkspaceSummary,
+  projectSummaryToWorkspaceSummary,
 } from '@/lib/project-workspace'
 
 function buildRecentActivity(projects: ProjectWorkspaceSummary[]) {
@@ -51,8 +53,14 @@ function buildRecentOutputSuggestions(projects: ProjectWorkspaceSummary[]) {
 
 export default function ProjectsPage() {
   const { openNotebookDialog } = useCreateDialogs()
-  const { data: notebooks = [], isLoading } = useNotebooks(false)
-  const projects = notebooks.map(toProjectWorkspaceSummary)
+  const {
+    data: projectSummaries = [],
+    isLoading,
+    error,
+  } = useProjects(false)
+  const projects = projectSummaries.map((project) =>
+    projectSummaryToWorkspaceSummary(project)
+  )
   const recentActivity = buildRecentActivity(projects)
   const outputSuggestions = buildRecentOutputSuggestions(projects)
   const demoTarget =
@@ -99,7 +107,13 @@ export default function ProjectsPage() {
                 <Badge variant="outline">{projects.length} 个项目</Badge>
               </div>
 
-              {isLoading ? (
+              {error ? (
+                <Alert variant="destructive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>项目列表暂时加载失败</AlertTitle>
+                  <AlertDescription>{formatApiError(error)}</AlertDescription>
+                </Alert>
+              ) : isLoading ? (
                 <div className="flex min-h-72 items-center justify-center rounded-lg border border-dashed border-border/70">
                   <LoadingSpinner size="lg" />
                 </div>
