@@ -8,6 +8,9 @@ from api.schemas import (
     AskResponse,
     CompareSummary,
     EvidenceCard,
+    EvidenceThreadDetail,
+    EvidenceThreadMessage,
+    EvidenceThreadSummary,
     MemoryRecord,
     ProjectOverviewResponse,
     ProjectSummary,
@@ -278,9 +281,32 @@ def test_project_contracts_are_importable_and_composable():
         missing_items=[],
         human_review_required=[],
     )
+    thread_summary = EvidenceThreadSummary(
+        id="chat_session:demo",
+        project_id="project:demo",
+        title="Why this project matters",
+        created_at="2026-04-18T10:00:00Z",
+        updated_at="2026-04-18T10:05:00Z",
+        message_count=2,
+        last_question="What is the main contribution?",
+        last_answer_preview="The main contribution is...",
+    )
+    thread_detail = EvidenceThreadDetail(
+        **thread_summary.model_dump(),
+        messages=[
+            EvidenceThreadMessage(
+                id="msg:1",
+                type="human",
+                content="What is the main contribution?",
+            )
+        ],
+        latest_response=response,
+    )
 
     assert response.run_id == "run:001"
     assert overview.project.name == "Demo Project"
     assert compare.summary.startswith("Source A")
     assert run.run_type == "ask"
     assert run.steps[0].step_index == 0
+    assert thread_detail.latest_response is not None
+    assert thread_detail.messages[0].type == "human"

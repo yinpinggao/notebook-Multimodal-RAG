@@ -106,6 +106,48 @@ class AskResponse(_ContractModel):
     )
 
 
+class EvidenceThreadMessage(_ContractModel):
+    id: str = Field(..., description="Stable message identifier")
+    type: str = Field(..., description="Message type such as human or ai")
+    content: str = Field(..., description="Message content")
+    timestamp: Optional[str] = Field(
+        default=None,
+        description="Message timestamp when available",
+    )
+
+
+class EvidenceThreadSummary(_ContractModel):
+    id: str = Field(..., description="Thread identifier")
+    project_id: str = Field(..., description="Owning project identifier")
+    title: str = Field(..., description="Thread display title")
+    created_at: str = Field(..., description="Creation timestamp")
+    updated_at: str = Field(..., description="Last update timestamp")
+    message_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of persisted messages in the thread",
+    )
+    last_question: Optional[str] = Field(
+        default=None,
+        description="Most recent user question when available",
+    )
+    last_answer_preview: Optional[str] = Field(
+        default=None,
+        description="Short preview of the latest assistant answer",
+    )
+
+
+class EvidenceThreadDetail(EvidenceThreadSummary):
+    messages: list[EvidenceThreadMessage] = Field(
+        default_factory=list,
+        description="Persisted thread messages",
+    )
+    latest_response: Optional[AskResponse] = Field(
+        default=None,
+        description="Reconstructed response metadata for the latest exchange",
+    )
+
+
 class CompareItem(_ContractModel):
     title: str = Field(..., description="Short label for the compare finding")
     detail: str = Field(..., description="Expanded description of the finding")
@@ -143,6 +185,9 @@ __all__ = [
     "EvidenceCard",
     "MemoryUpdatePreview",
     "AskResponse",
+    "EvidenceThreadMessage",
+    "EvidenceThreadSummary",
+    "EvidenceThreadDetail",
     "CompareItem",
     "CompareSummary",
 ]
