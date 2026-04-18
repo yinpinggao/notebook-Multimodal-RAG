@@ -1,8 +1,11 @@
 import apiClient from './client'
 import {
+  ArtifactRecordResponse,
   CreateProjectRequest,
   EvidenceThreadDetailResponse,
   EvidenceThreadSummaryResponse,
+  ProjectArtifactCreateResponse,
+  ProjectArtifactRequest,
   ProjectCompareCreateResponse,
   ProjectCompareExportResponse,
   ProjectCompareRecordResponse,
@@ -52,6 +55,38 @@ export const projectsApi = {
   exportCompare: async (id: string, compareId: string) => {
     const response = await apiClient.post<ProjectCompareExportResponse>(
       `/projects/${id}/compare/${encodeURIComponent(compareId)}/export`
+    )
+    return response.data
+  },
+
+  listCompares: async (id: string) => {
+    const response = await apiClient.get<ProjectCompareRecordResponse[]>(`/projects/${id}/compare`)
+    return response.data
+  },
+
+  listArtifacts: async (id: string) => {
+    const response = await apiClient.get<ArtifactRecordResponse[]>(`/projects/${id}/artifacts`)
+    return response.data
+  },
+
+  getArtifact: async (id: string, artifactId: string) => {
+    const response = await apiClient.get<ArtifactRecordResponse>(
+      `/projects/${id}/artifacts/${encodeURIComponent(artifactId)}`
+    )
+    return response.data
+  },
+
+  createArtifact: async (id: string, data: ProjectArtifactRequest) => {
+    const response = await apiClient.post<ProjectArtifactCreateResponse>(
+      `/projects/${id}/artifacts`,
+      data
+    )
+    return response.data
+  },
+
+  regenerateArtifact: async (id: string, artifactId: string) => {
+    const response = await apiClient.post<ProjectArtifactCreateResponse>(
+      `/projects/${id}/artifacts/${encodeURIComponent(artifactId)}/regenerate`
     )
     return response.data
   },

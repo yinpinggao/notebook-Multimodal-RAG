@@ -61,6 +61,23 @@ async def create_project_compare(project_id: str, request: ProjectCompareRequest
 
 
 @router.get(
+    "/projects/{project_id}/compare",
+    response_model=list[ProjectCompareRecord],
+)
+async def list_project_compares(project_id: str):
+    try:
+        return await project_compare_service.list_project_compares(project_id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error listing compares for {project_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listing project compares: {e}",
+        ) from e
+
+
+@router.get(
     "/projects/{project_id}/compare/{compare_id}",
     response_model=ProjectCompareRecord,
 )

@@ -1,5 +1,6 @@
 """seekdb-commands integration for Open Notebook"""
 
+from .artifact_commands import generate_artifact_command
 from .compare_commands import compare_sources_command
 from .embedding_commands import (
     embed_insight_command,
@@ -34,6 +35,7 @@ __all__ = [
     "rebuild_embeddings_command",
     # Other commands
     "generate_podcast_command",
+    "generate_artifact_command",
     "process_source_command",
     "process_text_command",
     "analyze_data_command",

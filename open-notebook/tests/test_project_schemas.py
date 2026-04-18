@@ -12,6 +12,7 @@ from api.schemas import (
     EvidenceThreadMessage,
     EvidenceThreadSummary,
     MemoryRecord,
+    ProjectArtifactCreateResponse,
     ProjectOverviewResponse,
     ProjectSummary,
     RecentArtifactSummary,
@@ -42,6 +43,13 @@ def test_memory_record_schema_contains_required_fields():
 
 def test_artifact_record_schema_contains_created_by_run_id():
     schema = ArtifactRecord.model_json_schema()
+    required = set(schema.get("required", []))
+
+    assert "created_by_run_id" in required
+
+
+def test_artifact_create_response_schema_contains_created_by_run_id():
+    schema = ProjectArtifactCreateResponse.model_json_schema()
     required = set(schema.get("required", []))
 
     assert "created_by_run_id" in required

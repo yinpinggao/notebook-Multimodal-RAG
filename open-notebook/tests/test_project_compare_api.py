@@ -105,6 +105,33 @@ def test_get_project_compare_returns_record(mock_get_compare, client):
 
 
 @patch(
+    "api.routers.project_compare.project_compare_service.list_project_compares",
+    new_callable=AsyncMock,
+)
+def test_list_project_compares_returns_records(mock_list_compares, client):
+    mock_list_compares.return_value = [
+        ProjectCompareRecord(
+            id="cmp_demo",
+            project_id="project:demo",
+            compare_mode="general",
+            source_a_id="source:a",
+            source_b_id="source:b",
+            source_a_title="A",
+            source_b_title="B",
+            status="completed",
+            created_at="2026-04-18T12:00:00Z",
+            updated_at="2026-04-18T12:00:01Z",
+            result=CompareSummary(summary="done"),
+        )
+    ]
+
+    response = client.get("/api/projects/project:demo/compare")
+
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == "cmp_demo"
+
+
+@patch(
     "api.routers.project_compare.project_compare_service.export_project_compare",
     new_callable=AsyncMock,
 )

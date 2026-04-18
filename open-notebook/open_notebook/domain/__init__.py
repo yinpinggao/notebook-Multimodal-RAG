@@ -1,6 +1,6 @@
 """Domain models for Open Notebook."""
 
-from open_notebook.domain.artifacts import ArtifactRecord
+from open_notebook.domain.artifacts import ArtifactRecord, ProjectArtifactCreateResponse
 from open_notebook.domain.compare import (
     ProjectCompareCreateResponse,
     ProjectCompareExportResponse,
@@ -25,6 +25,7 @@ from open_notebook.domain.runs import AgentRun, AgentStep
 
 __all__ = [
     "ArtifactRecord",
+    "ProjectArtifactCreateResponse",
     "ProjectCompareCreateResponse",
     "ProjectCompareExportResponse",
     "ProjectCompareRecord",

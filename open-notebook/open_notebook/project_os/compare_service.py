@@ -8,6 +8,7 @@ from typing import Iterable, cast
 from uuid import uuid4
 
 from loguru import logger
+from pydantic import BaseModel, ConfigDict, Field
 
 from open_notebook.domain.compare import ProjectCompareMode, ProjectCompareRecord
 from open_notebook.domain.evidence import CompareItem, CompareSummary
@@ -90,8 +91,21 @@ class _Signal:
     numbers: tuple[str, ...] = ()
 
 
+class _Model(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProjectCompareIndex(_Model):
+    project_id: str
+    compare_ids: list[str] = Field(default_factory=list)
+
+
 def project_compare_record_id(compare_id: str) -> str:
     return f"project_compare:{compare_id}"
+
+
+def project_compare_index_record_id(project_id: str) -> str:
+    return f"project_compare_index:{project_id}"
 
 
 def create_compare_id() -> str:
@@ -119,6 +133,36 @@ def _normalize_text(value: str) -> str:
     collapsed = " ".join(str(value or "").strip().split())
     lowered = collapsed.casefold()
     return re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", lowered)
+
+
+async def _load_project_compare_index(project_id: str) -> ProjectCompareIndex:
+    data = await seekdb_business_store.get_singleton(
+        project_compare_index_record_id(project_id)
+    )
+    if not data:
+        return ProjectCompareIndex(project_id=project_id)
+    return ProjectCompareIndex.model_validate(_strip_singleton_metadata(data))
+
+
+async def _save_project_compare_index(
+    index: ProjectCompareIndex,
+) -> ProjectCompareIndex:
+    saved = await seekdb_business_store.upsert_singleton(
+        project_compare_index_record_id(index.project_id),
+        index.model_dump(mode="json"),
+    )
+    return ProjectCompareIndex.model_validate(_strip_singleton_metadata(saved))
+
+
+async def _register_project_compare(project_id: str, compare_id: str) -> None:
+    index = await _load_project_compare_index(project_id)
+    compare_ids = [compare_id, *index.compare_ids]
+    deduped_ids: list[str] = []
+    for item in compare_ids:
+        if item and item not in deduped_ids:
+            deduped_ids.append(item)
+    index.compare_ids = deduped_ids
+    await _save_project_compare_index(index)
 
 
 def _clean_display(value: str, *, limit: int = 160) -> str:
@@ -546,6 +590,23 @@ async def load_project_compare_for_project(
     return record
 
 
+async def list_project_compares(
+    project_id: str,
+    *,
+    limit: int = 30,
+) -> list[ProjectCompareRecord]:
+    index = await _load_project_compare_index(project_id)
+    records: list[ProjectCompareRecord] = []
+    for compare_id in index.compare_ids:
+        record = await load_project_compare(compare_id)
+        if not record or record.project_id != project_id:
+            continue
+        records.append(record)
+
+    records.sort(key=lambda item: item.updated_at, reverse=True)
+    return records[:limit]
+
+
 async def save_project_compare(record: ProjectCompareRecord) -> ProjectCompareRecord:
     saved = await seekdb_business_store.upsert_singleton(
         project_compare_record_id(record.id),
@@ -626,7 +687,9 @@ async def initialize_project_compare(
         updated_at=now,
         result=None,
     )
-    return await save_project_compare(record)
+    saved = await save_project_compare(record)
+    await _register_project_compare(project_id, saved.id)
+    return saved
 
 
 async def _fallback_source_profile(source_id: str) -> SourceProfile:
@@ -759,10 +822,12 @@ __all__ = [
     "compare_source_profiles",
     "create_compare_id",
     "initialize_project_compare",
+    "list_project_compares",
     "load_project_compare",
     "load_project_compare_for_project",
     "mark_project_compare_status",
     "normalize_compare_mode",
+    "project_compare_index_record_id",
     "project_compare_record_id",
     "render_project_compare_markdown",
     "save_project_compare",

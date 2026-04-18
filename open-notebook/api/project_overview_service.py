@@ -5,9 +5,14 @@ from typing import Any
 
 from loguru import logger
 
-from api.schemas import ProjectOverviewResponse, ProjectTimelineEvent
+from api.schemas import (
+    ProjectOverviewResponse,
+    ProjectTimelineEvent,
+    RecentArtifactSummary,
+)
 from open_notebook.domain.notebook import Source
 from open_notebook.jobs import async_submit_command
+from open_notebook.project_os import artifact_service as project_os_artifact_service
 from open_notebook.project_os import overview_service as project_os_overview_service
 from open_notebook.storage.visual_assets import visual_asset_store
 
@@ -213,10 +218,36 @@ async def _source_runtime_rows(project_id: str) -> tuple[list[dict[str, Any]], d
     }
 
 
+async def _recent_artifact_summaries(
+    project_id: str,
+    *,
+    limit: int = 5,
+) -> list[RecentArtifactSummary]:
+    artifacts = await project_os_artifact_service.list_project_artifacts(
+        project_id,
+        limit=limit + 5,
+    )
+    summaries = [
+        RecentArtifactSummary(
+            id=artifact.id,
+            artifact_type=artifact.artifact_type,
+            title=artifact.title,
+            created_at=artifact.created_at,
+            created_by_run_id=artifact.created_by_run_id,
+        )
+        for artifact in artifacts
+        if artifact.status not in {"archived", "failed"}
+    ]
+    return summaries[:limit]
+
+
 async def get_project_overview(project_id: str) -> ProjectOverviewResponse:
     project = await project_workspace_service.get_project(project_id)
-    sources, live_metrics = await _source_runtime_rows(project_id)
-    snapshot = await project_os_overview_service.load_project_overview_snapshot(project_id)
+    (sources, live_metrics), snapshot, recent_artifacts = await asyncio.gather(
+        _source_runtime_rows(project_id),
+        project_os_overview_service.load_project_overview_snapshot(project_id),
+        _recent_artifact_summaries(project_id),
+    )
 
     raw_topics = [
         topic
@@ -275,7 +306,7 @@ async def get_project_overview(project_id: str) -> ProjectOverviewResponse:
         timeline_events=timeline_events,
         recommended_questions=recommended_questions,
         recent_runs=[],
-        recent_artifacts=[],
+        recent_artifacts=recent_artifacts,
     )
 
 

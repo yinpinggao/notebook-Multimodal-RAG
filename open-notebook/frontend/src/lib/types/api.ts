@@ -201,6 +201,63 @@ export interface ProjectCompareExportResponse {
   content: string
 }
 
+export type ArtifactType =
+  | 'project_summary'
+  | 'literature_review'
+  | 'diff_report'
+  | 'risk_list'
+  | 'defense_outline'
+  | 'judge_questions'
+  | 'qa_cards'
+  | 'presentation_script'
+  | 'podcast'
+
+export type ArtifactOriginKind = 'overview' | 'compare' | 'thread'
+export type ArtifactStatus =
+  | 'queued'
+  | 'running'
+  | 'draft'
+  | 'ready'
+  | 'archived'
+  | 'failed'
+
+export interface ArtifactRecordResponse {
+  id: string
+  project_id: string
+  artifact_type: ArtifactType
+  title: string
+  content_md: string
+  source_refs: string[]
+  created_by_run_id: string
+  created_at: string
+  updated_at: string
+  status: ArtifactStatus
+  thread_id?: string | null
+  origin_kind?: ArtifactOriginKind | null
+  origin_id?: string | null
+  command_id?: string | null
+  error_message?: string | null
+}
+
+export interface ProjectArtifactRequest {
+  artifact_type:
+    | 'project_summary'
+    | 'diff_report'
+    | 'defense_outline'
+    | 'judge_questions'
+    | 'qa_cards'
+  origin_kind: ArtifactOriginKind
+  origin_id?: string
+  title?: string
+}
+
+export interface ProjectArtifactCreateResponse {
+  artifact_id: string
+  status: ArtifactStatus
+  command_id?: string | null
+  created_by_run_id: string
+}
+
 export interface NoteResponse {
   id: string
   title: string | null

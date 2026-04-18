@@ -73,6 +73,11 @@ async def get_project_compare(
     )
 
 
+async def list_project_compares(project_id: str) -> list[ProjectCompareRecord]:
+    await project_workspace_service.get_project(project_id)
+    return await project_os_compare_service.list_project_compares(project_id)
+
+
 async def export_project_compare(
     project_id: str,
     compare_id: str,
