@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from uuid import uuid4
-
 from api.schemas import ArtifactRecord, ProjectArtifactCreateResponse
+from open_notebook.agent_harness import (
+    create_project_run,
+    mark_run_failed,
+    record_step,
+)
 from open_notebook.domain.artifacts import ArtifactOriginKind, ArtifactType
 from open_notebook.exceptions import InvalidInputError
 from open_notebook.jobs import async_submit_command
@@ -36,10 +39,6 @@ def _dedupe_refs(values: list[str], *, limit: int = 12) -> list[str]:
         if len(deduped) >= limit:
             break
     return deduped
-
-
-def _artifact_run_id() -> str:
-    return f"run:{uuid4().hex[:12]}"
 
 
 async def _build_overview_source_snapshot(project_id: str) -> ArtifactSourceSnapshot:
@@ -204,7 +203,16 @@ async def queue_project_artifact(
 ) -> ProjectArtifactCreateResponse:
     await project_workspace_service.get_project(project_id)
     source_snapshot = await _resolve_source_snapshot(project_id, origin_kind, origin_id)
-    created_by_run_id = _artifact_run_id()
+    run = await create_project_run(
+        project_id,
+        run_type="artifact",
+        input_json={
+            "artifact_type": artifact_type,
+            "origin_kind": origin_kind,
+            "origin_id": origin_id,
+            "title": title,
+        },
+    )
 
     artifact = await project_os_artifact_service.initialize_project_artifact(
         project_id,
@@ -212,7 +220,7 @@ async def queue_project_artifact(
         origin_kind=origin_kind,
         origin_id=origin_id,
         source_snapshot=source_snapshot,
-        created_by_run_id=created_by_run_id,
+        created_by_run_id=run.id,
         title=title,
         thread_id=origin_id if origin_kind == "thread" else None,
     )
@@ -224,6 +232,7 @@ async def queue_project_artifact(
             {
                 "project_id": project_id,
                 "artifact_id": artifact.id,
+                "run_id": run.id,
             },
         )
     except Exception as exc:
@@ -232,6 +241,7 @@ async def queue_project_artifact(
             "failed",
             error_message=str(exc),
         )
+        await mark_run_failed(run.id, str(exc))
         raise
 
     queued_artifact = await project_os_artifact_service.mark_project_artifact_status(
@@ -239,6 +249,18 @@ async def queue_project_artifact(
         "queued",
         command_id=command_id,
         error_message=None,
+    )
+    await record_step(
+        run.id,
+        title="产物任务已入队",
+        step_type="system",
+        status="completed",
+        agent_name="project_harness",
+        output_json={
+            "artifact_id": queued_artifact.id,
+            "command_id": command_id,
+        },
+        output_refs=[queued_artifact.id],
     )
     return ProjectArtifactCreateResponse(
         artifact_id=queued_artifact.id,
@@ -278,7 +300,17 @@ async def regenerate_project_artifact(
         artifact.origin_kind,
         artifact.origin_id,
     )
-    created_by_run_id = _artifact_run_id()
+    run = await create_project_run(
+        project_id,
+        run_type="artifact",
+        input_json={
+            "artifact_type": artifact.artifact_type,
+            "origin_kind": artifact.origin_kind,
+            "origin_id": artifact.origin_id,
+            "artifact_id": artifact.id,
+            "title": artifact.title,
+        },
+    )
 
     await project_os_artifact_service.update_project_artifact_source_snapshot(
         artifact_id,
@@ -291,7 +323,7 @@ async def regenerate_project_artifact(
         error_message=None,
         content_md="",
         source_refs=source_snapshot.source_refs,
-        created_by_run_id=created_by_run_id,
+        created_by_run_id=run.id,
         title=artifact.title,
     )
 
@@ -302,6 +334,7 @@ async def regenerate_project_artifact(
             {
                 "project_id": project_id,
                 "artifact_id": artifact_id,
+                "run_id": run.id,
             },
         )
     except Exception as exc:
@@ -309,8 +342,9 @@ async def regenerate_project_artifact(
             artifact_id,
             "failed",
             error_message=str(exc),
-            created_by_run_id=created_by_run_id,
+            created_by_run_id=run.id,
         )
+        await mark_run_failed(run.id, str(exc))
         raise
 
     queued_artifact = await project_os_artifact_service.mark_project_artifact_status(
@@ -318,7 +352,19 @@ async def regenerate_project_artifact(
         "queued",
         command_id=command_id,
         error_message=None,
-        created_by_run_id=created_by_run_id,
+        created_by_run_id=run.id,
+    )
+    await record_step(
+        run.id,
+        title="重新生成任务已入队",
+        step_type="system",
+        status="completed",
+        agent_name="project_harness",
+        output_json={
+            "artifact_id": queued_artifact.id,
+            "command_id": command_id,
+        },
+        output_refs=[queued_artifact.id],
     )
     return ProjectArtifactCreateResponse(
         artifact_id=queued_artifact.id,

@@ -1,5 +1,6 @@
 import apiClient from './client'
 import {
+  AgentRunResponse,
   ArtifactRecordResponse,
   CreateProjectRequest,
   EvidenceThreadDetailResponse,
@@ -46,6 +47,18 @@ export const projectsApi = {
 
   listMemory: async (id: string) => {
     const response = await apiClient.get<MemoryRecordResponse[]>(`/projects/${id}/memory`)
+    return response.data
+  },
+
+  listRuns: async (id: string) => {
+    const response = await apiClient.get<AgentRunResponse[]>(`/projects/${id}/runs`)
+    return response.data
+  },
+
+  getRun: async (id: string, runId: string) => {
+    const response = await apiClient.get<AgentRunResponse>(
+      `/projects/${id}/runs/${encodeURIComponent(runId)}`
+    )
     return response.data
   },
 

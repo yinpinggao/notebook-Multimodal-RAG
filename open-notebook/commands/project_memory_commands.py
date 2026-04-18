@@ -2,6 +2,12 @@ import time
 
 from pydantic import Field
 
+from open_notebook.agent_harness import (
+    mark_run_completed,
+    mark_run_failed,
+    mark_run_running,
+    record_memory_write,
+)
 from open_notebook.jobs import CommandInput, CommandOutput, command
 from open_notebook.memory_center.memory_writer import rebuild_project_memories
 from open_notebook.memory_center.powermem_adapter import mark_project_memory_status
@@ -9,6 +15,7 @@ from open_notebook.memory_center.powermem_adapter import mark_project_memory_sta
 
 class ProjectRefreshMemoryInput(CommandInput):
     project_id: str
+    run_id: str | None = None
 
 
 class ProjectRefreshMemoryOutput(CommandOutput):
@@ -35,6 +42,8 @@ async def refresh_project_memory_command(
         command_id=command_id,
         error_message=None,
     )
+    if input_data.run_id:
+        await mark_run_running(input_data.run_id)
 
     try:
         records = await rebuild_project_memories(
@@ -44,6 +53,35 @@ async def refresh_project_memory_command(
         breakdown: dict[str, int] = {}
         for record in records:
             breakdown[record.status] = breakdown.get(record.status, 0) + 1
+        if input_data.run_id:
+            evidence_refs = [
+                ref.internal_ref
+                for record in records
+                for ref in record.source_refs
+            ]
+            memory_ids = [record.id for record in records]
+            await record_memory_write(
+                input_data.run_id,
+                title="写入项目记忆",
+                agent_name="memory_center",
+                output_json={
+                    "memory_count": len(records),
+                    "status_breakdown": breakdown,
+                },
+                evidence_refs=evidence_refs,
+                memory_refs=memory_ids,
+            )
+            await mark_run_completed(
+                input_data.run_id,
+                output_json={
+                    "memory_count": len(records),
+                    "status_breakdown": breakdown,
+                },
+                tool_calls=["rebuild_project_memories"],
+                evidence_reads=evidence_refs,
+                memory_writes=memory_ids,
+                outputs=memory_ids,
+            )
         return ProjectRefreshMemoryOutput(
             success=True,
             project_id=input_data.project_id,
@@ -58,6 +96,8 @@ async def refresh_project_memory_command(
             command_id=command_id,
             error_message=str(exc),
         )
+        if input_data.run_id:
+            await mark_run_failed(input_data.run_id, str(exc))
         raise
 
 

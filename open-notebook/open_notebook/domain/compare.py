@@ -55,6 +55,10 @@ class ProjectCompareCreateResponse(_ContractModel):
         default=None,
         description="Associated async command identifier when queued",
     )
+    run_id: Optional[str] = Field(
+        default=None,
+        description="Associated run identifier for trace inspection",
+    )
 
 
 class ProjectCompareExportResponse(_ContractModel):

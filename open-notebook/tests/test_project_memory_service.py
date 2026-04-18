@@ -129,13 +129,17 @@ async def test_delete_memory_record_returns_deleted_payload(
 
 
 @pytest.mark.asyncio
+@patch("api.project_memory_service.record_step", new_callable=AsyncMock)
 @patch("api.project_memory_service.mark_project_memory_status", new_callable=AsyncMock)
 @patch("api.project_memory_service.async_submit_command", new_callable=AsyncMock)
+@patch("api.project_memory_service.create_project_run", new_callable=AsyncMock)
 @patch("api.project_memory_service.project_workspace_service.get_project", new_callable=AsyncMock)
 async def test_queue_project_memory_rebuild_submits_command(
     mock_get_project,
+    mock_create_run,
     mock_submit_command,
     mock_mark_memory_status,
+    mock_record_step,
 ):
     mock_get_project.return_value = ProjectSummary(
         id="project:demo",
@@ -148,6 +152,11 @@ async def test_queue_project_memory_rebuild_submits_command(
         artifact_count=1,
         memory_count=1,
     )
+    mock_create_run.return_value = type(
+        "Run",
+        (),
+        {"id": "run:memory001"},
+    )()
     mock_submit_command.return_value = "command:memory:1"
 
     response = await queue_project_memory_rebuild("project:demo")
@@ -157,11 +166,15 @@ async def test_queue_project_memory_rebuild_submits_command(
         "status": "queued",
         "message": "Project memory rebuild queued.",
         "command_id": "command:memory:1",
+        "run_id": "run:memory001",
     }
     mock_submit_command.assert_awaited_once_with(
         "open_notebook",
         "refresh_memory",
-        {"project_id": "project:demo"},
+        {
+            "project_id": "project:demo",
+            "run_id": "run:memory001",
+        },
     )
     mock_mark_memory_status.assert_awaited_once_with(
         "project:demo",
@@ -169,3 +182,4 @@ async def test_queue_project_memory_rebuild_submits_command(
         command_id="command:memory:1",
         error_message=None,
     )
+    mock_record_step.assert_awaited_once()

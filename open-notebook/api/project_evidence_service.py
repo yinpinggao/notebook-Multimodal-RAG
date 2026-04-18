@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Literal, Optional
-from uuid import uuid4
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
@@ -12,6 +11,15 @@ from api.schemas import (
     EvidenceThreadDetail,
     EvidenceThreadMessage,
     EvidenceThreadSummary,
+)
+from open_notebook.agent_harness import (
+    create_project_run,
+    mark_run_completed,
+    mark_run_failed,
+    mark_run_running,
+    record_answer_step,
+    record_evidence_read,
+    record_tool_call,
 )
 from open_notebook.domain.notebook import ChatSession, Notebook
 from open_notebook.evidence import build_evidence_cards
@@ -338,58 +346,140 @@ async def ask_project(
 
     _, notebook, source_ids, note_ids = await _resolve_project_scope(project_id)
     session = await _get_or_create_thread(project_id, question, thread_id=thread_id)
-    run_id = f"run:{uuid4().hex[:12]}"
-
-    evidence = await build_multimodal_evidence(
-        question,
-        source_ids=source_ids or None,
-        note_ids=note_ids or None,
-        include_sources=True,
-        include_notes=True,
-        limit=8,
-        minimum_score=0.2,
+    run = await create_project_run(
+        project_id,
+        run_type="ask",
+        input_json={
+            "question": question,
+            "mode": mode,
+            "thread_id": str(session.id or ""),
+        },
     )
-    results = evidence.get("results") or []
-    selected_mode = select_project_ask_mode(mode, question, results)
-    evidence_cards = build_evidence_cards(
-        project_id=project_id,
-        thread_id=str(session.id or ""),
-        rows=results,
-        mode=selected_mode,
-    )
-    source_names = [card.source_name for card in evidence_cards]
-    context_text = (evidence.get("context_text") or "").strip()
-    if not results:
-        context_text = NO_EVIDENCE_CONTEXT
+    await mark_run_running(run.id)
 
-    answer = await _generate_answer_for_thread(
-        session=session,
-        notebook=notebook,
-        question=question,
-        context_text=context_text,
-    )
+    try:
+        evidence = await build_multimodal_evidence(
+            question,
+            source_ids=source_ids or None,
+            note_ids=note_ids or None,
+            include_sources=True,
+            include_notes=True,
+            limit=8,
+            minimum_score=0.2,
+        )
+        results = evidence.get("results") or []
+        selected_mode = select_project_ask_mode(mode, question, results)
+        evidence_cards = build_evidence_cards(
+            project_id=project_id,
+            thread_id=str(session.id or ""),
+            rows=results,
+            mode=selected_mode,
+        )
+        evidence_refs = [card.internal_ref for card in evidence_cards]
+        source_names = [card.source_name for card in evidence_cards]
+        context_text = (evidence.get("context_text") or "").strip()
+        if not results:
+            context_text = NO_EVIDENCE_CONTEXT
 
-    if not results and "证据" not in answer and "资料" not in answer:
-        answer = (
-            "我暂时没有在当前项目资料里找到足够证据来支持明确结论。"
-            "建议缩小问题范围、指定文件，或先补充更相关的资料后再问。"
+        await record_tool_call(
+            run.id,
+            title="检索项目证据",
+            tool_name="build_multimodal_evidence",
+            agent_name="evidence_agent",
+            input_json={
+                "question": question,
+                "requested_mode": mode,
+            },
+            output_json={
+                "result_count": len(results),
+                "selected_mode": selected_mode,
+            },
+            evidence_refs=evidence_refs,
+        )
+        await record_evidence_read(
+            run.id,
+            title="整理证据卡片",
+            agent_name="evidence_agent",
+            output_json={
+                "evidence_card_count": len(evidence_cards),
+            },
+            evidence_refs=evidence_refs,
         )
 
-    return AskResponse(
-        answer=answer,
-        confidence=_estimate_confidence(results, selected_mode),
-        evidence_cards=evidence_cards,
-        memory_updates=[],
-        run_id=run_id,
-        suggested_followups=_build_suggested_followups(
+        answer = await _generate_answer_for_thread(
+            session=session,
+            notebook=notebook,
+            question=question,
+            context_text=context_text,
+        )
+
+        if not results and "证据" not in answer and "资料" not in answer:
+            answer = (
+                "我暂时没有在当前项目资料里找到足够证据来支持明确结论。"
+                "建议缩小问题范围、指定文件，或先补充更相关的资料后再问。"
+            )
+
+        confidence = _estimate_confidence(results, selected_mode)
+        suggested_followups = _build_suggested_followups(
             question,
             selected_mode,
             source_names,
             bool(evidence_cards),
-        ),
-        mode=selected_mode,
-        thread_id=str(session.id or ""),
-    )
+        )
+
+        await record_tool_call(
+            run.id,
+            title="生成项目回答",
+            tool_name="chat_graph.invoke",
+            agent_name="answer_agent",
+            input_json={
+                "thread_id": str(session.id or ""),
+                "mode": selected_mode,
+            },
+            output_json={
+                "answer_length": len(answer),
+                "confidence": confidence,
+            },
+            evidence_refs=evidence_refs,
+            output_refs=[str(session.id or "")],
+        )
+        await record_answer_step(
+            run.id,
+            title="返回回答结果",
+            agent_name="answer_agent",
+            output_json={
+                "mode": selected_mode,
+                "suggested_followup_count": len(suggested_followups),
+            },
+            evidence_refs=evidence_refs,
+            output_refs=[str(session.id or "")],
+        )
+        await mark_run_completed(
+            run.id,
+            output_json={
+                "mode": selected_mode,
+                "confidence": confidence,
+                "evidence_card_count": len(evidence_cards),
+                "thread_id": str(session.id or ""),
+            },
+            tool_calls=["build_multimodal_evidence", "chat_graph.invoke"],
+            evidence_reads=evidence_refs,
+            outputs=[str(session.id or "")],
+        )
+
+        return AskResponse(
+            answer=answer,
+            confidence=confidence,
+            evidence_cards=evidence_cards,
+            memory_updates=[],
+            run_id=run.id,
+            suggested_followups=suggested_followups,
+            mode=selected_mode,
+            thread_id=str(session.id or ""),
+        )
+    except Exception as exc:
+        await mark_run_failed(run.id, str(exc))
+        raise
 
 
 async def list_project_threads(project_id: str) -> list[EvidenceThreadSummary]:

@@ -126,6 +126,7 @@ export interface ProjectMemoryRebuildResponse {
   status: string
   message: string
   command_id?: string | null
+  run_id?: string | null
 }
 
 export interface ProjectAskResponse {
@@ -221,6 +222,75 @@ export interface ProjectCompareCreateResponse {
   compare_id: string
   status: ProjectCompareStatus
   command_id?: string | null
+  run_id?: string | null
+}
+
+export type AgentRunStatus =
+  | 'queued'
+  | 'running'
+  | 'waiting_review'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export type AgentRunType =
+  | 'ask'
+  | 'compare'
+  | 'artifact'
+  | 'memory_rebuild'
+  | 'overview_rebuild'
+  | 'ingest'
+  | 'unknown'
+
+export type AgentStepType =
+  | 'plan'
+  | 'tool_call'
+  | 'evidence_read'
+  | 'memory_write'
+  | 'artifact_write'
+  | 'answer'
+  | 'compare'
+  | 'system'
+
+export type AgentStepStatus = 'queued' | 'running' | 'completed' | 'failed' | 'skipped'
+
+export interface AgentStepResponse {
+  id: string
+  run_id?: string | null
+  step_index: number
+  agent_name?: string | null
+  title: string
+  type: AgentStepType
+  status: AgentStepStatus
+  started_at?: string | null
+  completed_at?: string | null
+  tool_name?: string | null
+  input_json?: Record<string, unknown> | null
+  output_json?: Record<string, unknown> | null
+  evidence_refs: string[]
+  memory_refs: string[]
+  output_refs: string[]
+  error?: string | null
+}
+
+export interface AgentRunResponse {
+  id: string
+  project_id: string
+  status: AgentRunStatus
+  run_type: AgentRunType
+  input_summary?: string | null
+  selected_skill?: string | null
+  input_json?: Record<string, unknown> | null
+  output_json?: Record<string, unknown> | null
+  created_at: string
+  started_at?: string | null
+  completed_at?: string | null
+  tool_calls: string[]
+  evidence_reads: string[]
+  memory_writes: string[]
+  outputs: string[]
+  steps: AgentStepResponse[]
+  failure_reason?: string | null
 }
 
 export interface ProjectCompareRecordResponse {

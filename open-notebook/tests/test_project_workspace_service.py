@@ -11,9 +11,11 @@ from api.project_workspace_service import get_project, list_projects
     new_callable=AsyncMock,
 )
 @patch("api.project_workspace_service.count_project_memories", new_callable=AsyncMock)
+@patch("api.project_workspace_service.get_project_last_run_at", new_callable=AsyncMock)
 @patch("api.project_workspace_service.seekdb_business_store.notebook_rows", new_callable=AsyncMock)
 async def test_list_projects_populates_artifact_counts(
     mock_notebook_rows,
+    mock_get_project_last_run_at,
     mock_count_memories,
     mock_count_artifacts,
 ):
@@ -39,11 +41,19 @@ async def test_list_projects_populates_artifact_counts(
     ]
     mock_count_artifacts.side_effect = [3, 1]
     mock_count_memories.side_effect = [2, 0]
+    mock_get_project_last_run_at.side_effect = [
+        "2026-04-18T09:30:00Z",
+        None,
+    ]
 
     projects = await list_projects()
 
     assert [project.artifact_count for project in projects] == [3, 1]
     assert [project.memory_count for project in projects] == [2, 0]
+    assert [project.last_run_at for project in projects] == [
+        "2026-04-18T09:30:00Z",
+        None,
+    ]
     assert projects[0].status == "active"
     assert projects[1].status == "archived"
 
@@ -54,9 +64,11 @@ async def test_list_projects_populates_artifact_counts(
     new_callable=AsyncMock,
 )
 @patch("api.project_workspace_service.count_project_memories", new_callable=AsyncMock)
+@patch("api.project_workspace_service.get_project_last_run_at", new_callable=AsyncMock)
 @patch("api.project_workspace_service.seekdb_business_store.notebook_row", new_callable=AsyncMock)
 async def test_get_project_populates_artifact_count(
     mock_notebook_row,
+    mock_get_project_last_run_at,
     mock_count_memories,
     mock_count_artifacts,
 ):
@@ -71,9 +83,11 @@ async def test_get_project_populates_artifact_count(
     }
     mock_count_artifacts.return_value = 4
     mock_count_memories.return_value = 3
+    mock_get_project_last_run_at.return_value = "2026-04-18T09:45:00Z"
 
     project = await get_project("project:demo")
 
     assert project.id == "project:demo"
     assert project.artifact_count == 4
     assert project.memory_count == 3
+    assert project.last_run_at == "2026-04-18T09:45:00Z"

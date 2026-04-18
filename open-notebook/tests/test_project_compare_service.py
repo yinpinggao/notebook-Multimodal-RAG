@@ -14,7 +14,9 @@ from open_notebook.exceptions import InvalidInputError
     "api.project_compare_service.project_os_compare_service.mark_project_compare_status",
     new_callable=AsyncMock,
 )
+@patch("api.project_compare_service.record_step", new_callable=AsyncMock)
 @patch("api.project_compare_service.async_submit_command", new_callable=AsyncMock)
+@patch("api.project_compare_service.create_project_run", new_callable=AsyncMock)
 @patch(
     "api.project_compare_service.project_os_compare_service.initialize_project_compare",
     new_callable=AsyncMock,
@@ -23,7 +25,9 @@ from open_notebook.exceptions import InvalidInputError
 async def test_queue_project_compare_submits_command(
     mock_get_project,
     mock_initialize_compare,
+    mock_create_run,
     mock_submit_command,
+    mock_record_step,
     mock_mark_status,
 ):
     mock_get_project.return_value = ProjectSummary(
@@ -50,6 +54,11 @@ async def test_queue_project_compare_submits_command(
         updated_at="2026-04-18T12:00:00Z",
         result=None,
     )
+    mock_create_run.return_value = type(
+        "Run",
+        (),
+        {"id": "run:compare001"},
+    )()
     mock_submit_command.return_value = "command:compare:1"
     mock_mark_status.return_value = ProjectCompareRecord(
         id="cmp_demo",
@@ -76,6 +85,7 @@ async def test_queue_project_compare_submits_command(
     assert response.compare_id == "cmp_demo"
     assert response.status == "queued"
     assert response.command_id == "command:compare:1"
+    assert response.run_id == "run:compare001"
     mock_submit_command.assert_awaited_once_with(
         "open_notebook",
         "compare_sources",
@@ -85,8 +95,10 @@ async def test_queue_project_compare_submits_command(
           "source_a_id": "source:a",
           "source_b_id": "source:b",
           "compare_mode": "general",
+          "run_id": "run:compare001",
         },
     )
+    mock_record_step.assert_awaited_once()
 
 
 @pytest.mark.asyncio

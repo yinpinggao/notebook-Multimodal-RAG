@@ -58,7 +58,7 @@ export function useRebuildProjectMemory(projectId: string) {
 
   return useMutation({
     mutationFn: () => projectsApi.rebuildMemory(projectId),
-    onSuccess: async () => {
+    onSuccess: async (response) => {
       await queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.projectMemory(projectId),
       })
@@ -68,6 +68,14 @@ export function useRebuildProjectMemory(projectId: string) {
       await queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.projects,
       })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectRuns(projectId),
+      })
+      if (response.run_id) {
+        await queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.projectRun(projectId, response.run_id),
+        })
+      }
     },
   })
 }

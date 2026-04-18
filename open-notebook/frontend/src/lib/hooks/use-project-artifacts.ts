@@ -52,6 +52,12 @@ export function useCreateProjectArtifact(projectId: string) {
       await queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.projects,
       })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectRuns(projectId),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectRun(projectId, response.created_by_run_id),
+      })
     },
   })
 }
@@ -73,6 +79,12 @@ export function useRegenerateProjectArtifact(projectId: string) {
       })
       await queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.projects,
+      })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectRuns(projectId),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectRun(projectId, response.created_by_run_id),
       })
     },
   })

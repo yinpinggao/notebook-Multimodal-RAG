@@ -35,6 +35,7 @@ class ProjectMemoryRebuildResponse(BaseModel):
     status: str
     message: str
     command_id: Optional[str] = None
+    run_id: Optional[str] = None
 
 
 @router.get(

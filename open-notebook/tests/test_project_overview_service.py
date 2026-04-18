@@ -6,7 +6,7 @@ from api.project_overview_service import (
     get_project_overview,
     queue_project_overview_rebuild,
 )
-from api.schemas import ArtifactRecord, ProjectSummary
+from api.schemas import ArtifactRecord, ProjectSummary, RecentRunSummary
 from open_notebook.domain.projects import ProjectTimelineEvent
 from open_notebook.project_os.overview_service import ProjectOverviewSnapshot
 
@@ -57,6 +57,7 @@ async def test_queue_project_overview_rebuild_submits_command(
     "api.project_overview_service.project_os_artifact_service.list_project_artifacts",
     new_callable=AsyncMock,
 )
+@patch("api.project_overview_service._recent_run_summaries", new_callable=AsyncMock)
 @patch("api.project_overview_service._source_runtime_rows", new_callable=AsyncMock)
 @patch(
     "api.project_overview_service.project_os_overview_service.load_project_overview_snapshot",
@@ -67,6 +68,7 @@ async def test_get_project_overview_prefers_snapshot_data(
     mock_get_project,
     mock_load_snapshot,
     mock_source_runtime_rows,
+    mock_recent_run_summaries,
     mock_list_artifacts,
 ):
     mock_get_project.return_value = ProjectSummary(
@@ -127,6 +129,15 @@ async def test_get_project_overview_prefers_snapshot_data(
             status="ready",
         )
     ]
+    mock_recent_run_summaries.return_value = [
+        RecentRunSummary(
+            id="run:ask001",
+            run_type="ask",
+            status="completed",
+            created_at="2026-04-18T09:40:00Z",
+            completed_at="2026-04-18T09:41:00Z",
+        )
+    ]
 
     response = await get_project_overview("project:demo")
 
@@ -136,6 +147,7 @@ async def test_get_project_overview_prefers_snapshot_data(
     assert response.timeline_events[0].title == "Extracted event"
     assert response.recommended_questions == ["What is the strongest evidence?"]
     assert response.artifact_count == 2
+    assert response.recent_runs[0].id == "run:ask001"
     assert response.recent_artifacts[0].id == "artifact:demo"
     assert response.recent_artifacts[0].created_by_run_id == "run:artifact001"
 
@@ -145,6 +157,7 @@ async def test_get_project_overview_prefers_snapshot_data(
     "api.project_overview_service.project_os_artifact_service.list_project_artifacts",
     new_callable=AsyncMock,
 )
+@patch("api.project_overview_service._recent_run_summaries", new_callable=AsyncMock)
 @patch("api.project_overview_service._source_runtime_rows", new_callable=AsyncMock)
 @patch(
     "api.project_overview_service.project_os_overview_service.load_project_overview_snapshot",
@@ -155,6 +168,7 @@ async def test_get_project_overview_handles_absent_artifacts(
     mock_get_project,
     mock_load_snapshot,
     mock_source_runtime_rows,
+    mock_recent_run_summaries,
     mock_list_artifacts,
 ):
     mock_get_project.return_value = ProjectSummary(
@@ -187,8 +201,10 @@ async def test_get_project_overview_handles_absent_artifacts(
         project_id="project:demo"
     )
     mock_list_artifacts.return_value = []
+    mock_recent_run_summaries.return_value = []
 
     response = await get_project_overview("project:demo")
 
     assert response.artifact_count == 0
+    assert response.recent_runs == []
     assert response.recent_artifacts == []

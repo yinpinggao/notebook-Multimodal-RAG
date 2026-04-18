@@ -30,6 +30,7 @@ def test_create_project_compare_returns_queued(mock_queue_compare, client):
         compare_id="cmp_demo",
         status="queued",
         command_id="command:compare:1",
+        run_id="run:compare001",
     )
 
     response = client.post(
@@ -46,6 +47,7 @@ def test_create_project_compare_returns_queued(mock_queue_compare, client):
         "compare_id": "cmp_demo",
         "status": "queued",
         "command_id": "command:compare:1",
+        "run_id": "run:compare001",
     }
 
 
@@ -58,6 +60,7 @@ def test_create_project_compare_accepts_prd_alias_fields(mock_queue_compare, cli
         compare_id="cmp_demo",
         status="queued",
         command_id="command:compare:1",
+        run_id="run:compare001",
     )
 
     response = client.post(

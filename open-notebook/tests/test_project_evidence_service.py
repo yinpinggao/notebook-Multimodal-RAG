@@ -114,6 +114,12 @@ async def test_ask_project_rejects_blank_question():
 
 
 @pytest.mark.asyncio
+@patch("api.project_evidence_service.mark_run_completed", new_callable=AsyncMock)
+@patch("api.project_evidence_service.record_answer_step", new_callable=AsyncMock)
+@patch("api.project_evidence_service.record_tool_call", new_callable=AsyncMock)
+@patch("api.project_evidence_service.record_evidence_read", new_callable=AsyncMock)
+@patch("api.project_evidence_service.mark_run_running", new_callable=AsyncMock)
+@patch("api.project_evidence_service.create_project_run", new_callable=AsyncMock)
 @patch("api.project_evidence_service._generate_answer_for_thread", new_callable=AsyncMock)
 @patch("api.project_evidence_service.build_multimodal_evidence", new_callable=AsyncMock)
 @patch("api.project_evidence_service._get_or_create_thread", new_callable=AsyncMock)
@@ -123,6 +129,12 @@ async def test_ask_project_returns_text_response(
     mock_get_or_create_thread,
     mock_build_multimodal_evidence,
     mock_generate_answer_for_thread,
+    mock_create_run,
+    mock_mark_run_running,
+    mock_record_evidence_read,
+    mock_record_tool_call,
+    mock_record_answer_step,
+    mock_mark_run_completed,
 ):
     mock_resolve_project_scope.return_value = (
         SimpleNamespace(id="project:demo"),
@@ -131,6 +143,7 @@ async def test_ask_project_returns_text_response(
         [],
     )
     mock_get_or_create_thread.return_value = SimpleNamespace(id="chat_session:demo")
+    mock_create_run.return_value = SimpleNamespace(id="run:ask001")
     mock_build_multimodal_evidence.return_value = {
         "results": [
             {
@@ -154,12 +167,23 @@ async def test_ask_project_returns_text_response(
 
     assert response.mode == "text"
     assert response.thread_id == "chat_session:demo"
-    assert response.run_id is not None
+    assert response.run_id == "run:ask001"
     assert response.evidence_cards[0].source_id == "source:alpha"
     assert response.evidence_cards[0].page_no == 2
+    mock_mark_run_running.assert_awaited_once()
+    assert mock_record_tool_call.await_count == 2
+    mock_record_evidence_read.assert_awaited_once()
+    mock_record_answer_step.assert_awaited_once()
+    mock_mark_run_completed.assert_awaited_once()
 
 
 @pytest.mark.asyncio
+@patch("api.project_evidence_service.mark_run_completed", new_callable=AsyncMock)
+@patch("api.project_evidence_service.record_answer_step", new_callable=AsyncMock)
+@patch("api.project_evidence_service.record_tool_call", new_callable=AsyncMock)
+@patch("api.project_evidence_service.record_evidence_read", new_callable=AsyncMock)
+@patch("api.project_evidence_service.mark_run_running", new_callable=AsyncMock)
+@patch("api.project_evidence_service.create_project_run", new_callable=AsyncMock)
 @patch("api.project_evidence_service._generate_answer_for_thread", new_callable=AsyncMock)
 @patch("api.project_evidence_service.build_multimodal_evidence", new_callable=AsyncMock)
 @patch("api.project_evidence_service._get_or_create_thread", new_callable=AsyncMock)
@@ -169,6 +193,12 @@ async def test_ask_project_returns_visual_response(
     mock_get_or_create_thread,
     mock_build_multimodal_evidence,
     mock_generate_answer_for_thread,
+    mock_create_run,
+    mock_mark_run_running,
+    mock_record_evidence_read,
+    mock_record_tool_call,
+    mock_record_answer_step,
+    mock_mark_run_completed,
 ):
     mock_resolve_project_scope.return_value = (
         SimpleNamespace(id="project:demo"),
@@ -177,6 +207,7 @@ async def test_ask_project_returns_visual_response(
         [],
     )
     mock_get_or_create_thread.return_value = SimpleNamespace(id="chat_session:vision")
+    mock_create_run.return_value = SimpleNamespace(id="run:ask002")
     mock_build_multimodal_evidence.return_value = {
         "results": [
             {
@@ -206,9 +237,20 @@ async def test_ask_project_returns_visual_response(
     assert response.evidence_cards[0].relevance_reason is not None
     assert response.evidence_cards[0].image_thumb == "/tmp/deck-page-7.png"
     assert "图表" in response.answer
+    mock_mark_run_running.assert_awaited_once()
+    assert mock_record_tool_call.await_count == 2
+    mock_record_evidence_read.assert_awaited_once()
+    mock_record_answer_step.assert_awaited_once()
+    mock_mark_run_completed.assert_awaited_once()
 
 
 @pytest.mark.asyncio
+@patch("api.project_evidence_service.mark_run_completed", new_callable=AsyncMock)
+@patch("api.project_evidence_service.record_answer_step", new_callable=AsyncMock)
+@patch("api.project_evidence_service.record_tool_call", new_callable=AsyncMock)
+@patch("api.project_evidence_service.record_evidence_read", new_callable=AsyncMock)
+@patch("api.project_evidence_service.mark_run_running", new_callable=AsyncMock)
+@patch("api.project_evidence_service.create_project_run", new_callable=AsyncMock)
 @patch("api.project_evidence_service._generate_answer_for_thread", new_callable=AsyncMock)
 @patch("api.project_evidence_service.build_multimodal_evidence", new_callable=AsyncMock)
 @patch("api.project_evidence_service._get_or_create_thread", new_callable=AsyncMock)
@@ -218,6 +260,12 @@ async def test_ask_project_marks_uncertainty_when_evidence_is_missing(
     mock_get_or_create_thread,
     mock_build_multimodal_evidence,
     mock_generate_answer_for_thread,
+    mock_create_run,
+    mock_mark_run_running,
+    mock_record_evidence_read,
+    mock_record_tool_call,
+    mock_record_answer_step,
+    mock_mark_run_completed,
 ):
     mock_resolve_project_scope.return_value = (
         SimpleNamespace(id="project:demo"),
@@ -226,6 +274,7 @@ async def test_ask_project_marks_uncertainty_when_evidence_is_missing(
         [],
     )
     mock_get_or_create_thread.return_value = SimpleNamespace(id="chat_session:empty")
+    mock_create_run.return_value = SimpleNamespace(id="run:ask003")
     mock_build_multimodal_evidence.return_value = {
         "results": [],
         "context_text": "",
@@ -237,3 +286,8 @@ async def test_ask_project_marks_uncertainty_when_evidence_is_missing(
     assert response.confidence == 0.22
     assert response.evidence_cards == []
     assert "证据" in response.answer or "资料" in response.answer
+    mock_mark_run_running.assert_awaited_once()
+    assert mock_record_tool_call.await_count == 2
+    mock_record_evidence_read.assert_awaited_once()
+    mock_record_answer_step.assert_awaited_once()
+    mock_mark_run_completed.assert_awaited_once()

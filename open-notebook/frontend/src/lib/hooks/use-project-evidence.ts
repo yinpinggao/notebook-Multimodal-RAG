@@ -34,10 +34,24 @@ export function useAskProject(projectId: string) {
       await queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.projectThreads(projectId),
       })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectOverview(projectId),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projects,
+      })
 
       if (response.thread_id) {
         await queryClient.invalidateQueries({
           queryKey: QUERY_KEYS.projectThread(projectId, response.thread_id),
+        })
+      }
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectRuns(projectId),
+      })
+      if (response.run_id) {
+        await queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.projectRun(projectId, response.run_id),
         })
       }
     },
@@ -54,10 +68,24 @@ export function useFollowupProjectThread(projectId: string, threadId?: string) {
       await queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.projectThreads(projectId),
       })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectOverview(projectId),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projects,
+      })
 
       if (response.thread_id) {
         await queryClient.invalidateQueries({
           queryKey: QUERY_KEYS.projectThread(projectId, response.thread_id),
+        })
+      }
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectRuns(projectId),
+      })
+      if (response.run_id) {
+        await queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.projectRun(projectId, response.run_id),
         })
       }
     },

@@ -20,6 +20,20 @@ export function useCreateProjectCompare(projectId: string) {
       await queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.projectCompare(projectId, response.compare_id),
       })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectOverview(projectId),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projects,
+      })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectRuns(projectId),
+      })
+      if (response.run_id) {
+        await queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.projectRun(projectId, response.run_id),
+        })
+      }
     },
   })
 }

@@ -99,6 +99,7 @@ def test_rebuild_project_memory_returns_queued(mock_queue_rebuild, client):
         "status": "queued",
         "message": "Project memory rebuild queued.",
         "command_id": "command:memory:1",
+        "run_id": "run:memory001",
     }
 
     response = client.post("/api/projects/project:demo/memory/rebuild")
@@ -109,6 +110,7 @@ def test_rebuild_project_memory_returns_queued(mock_queue_rebuild, client):
         "status": "queued",
         "message": "Project memory rebuild queued.",
         "command_id": "command:memory:1",
+        "run_id": "run:memory001",
     }
 
 

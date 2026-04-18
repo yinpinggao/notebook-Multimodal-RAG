@@ -5,6 +5,11 @@ from api.schemas import (
     ProjectCompareExportResponse,
     ProjectCompareRecord,
 )
+from open_notebook.agent_harness import (
+    create_project_run,
+    mark_run_failed,
+    record_step,
+)
 from open_notebook.domain.compare import ProjectCompareMode
 from open_notebook.exceptions import InvalidInputError
 from open_notebook.jobs import async_submit_command
@@ -28,6 +33,18 @@ async def queue_project_compare(
         source_b_id=source_b_id,
         compare_mode=compare_mode,
     )
+    run = await create_project_run(
+        project_id,
+        run_type="compare",
+        input_json={
+            "compare_id": record.id,
+            "source_a_id": source_a_id,
+            "source_b_id": source_b_id,
+            "source_a_title": record.source_a_title,
+            "source_b_title": record.source_b_title,
+            "compare_mode": compare_mode,
+        },
+    )
 
     try:
         command_id = await async_submit_command(
@@ -39,6 +56,7 @@ async def queue_project_compare(
                 "source_a_id": source_a_id,
                 "source_b_id": source_b_id,
                 "compare_mode": compare_mode,
+                "run_id": run.id,
             },
         )
     except Exception as exc:
@@ -47,6 +65,7 @@ async def queue_project_compare(
             "failed",
             error_message=str(exc),
         )
+        await mark_run_failed(run.id, str(exc))
         raise
 
     queued_record = await project_os_compare_service.mark_project_compare_status(
@@ -55,10 +74,23 @@ async def queue_project_compare(
         command_id=command_id,
         error_message=None,
     )
+    await record_step(
+        run.id,
+        title="对比任务已入队",
+        step_type="system",
+        status="completed",
+        agent_name="project_harness",
+        output_json={
+            "compare_id": queued_record.id,
+            "command_id": command_id,
+        },
+        output_refs=[queued_record.id],
+    )
     return ProjectCompareCreateResponse(
         compare_id=queued_record.id,
         status=queued_record.status,
         command_id=queued_record.command_id,
+        run_id=run.id,
     )
 
 

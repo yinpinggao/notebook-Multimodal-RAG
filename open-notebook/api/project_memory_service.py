@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Optional
 
+from open_notebook.agent_harness import (
+    create_project_run,
+    mark_run_failed,
+    record_step,
+)
 from open_notebook.domain.memory import MemoryRecord
 from open_notebook.exceptions import InvalidInputError
 from open_notebook.jobs import async_submit_command
@@ -55,23 +60,51 @@ async def queue_project_memory_rebuild(project_id: str) -> dict[str, str | None]
     await project_workspace_service.get_project(project_id)
 
     import commands.project_memory_commands  # noqa: F401
-
-    command_id = await async_submit_command(
-        "open_notebook",
-        "refresh_memory",
-        {"project_id": project_id},
+    run = await create_project_run(
+        project_id,
+        run_type="memory_rebuild",
+        input_json={"project_id": project_id},
     )
+
+    try:
+        command_id = await async_submit_command(
+            "open_notebook",
+            "refresh_memory",
+            {
+                "project_id": project_id,
+                "run_id": run.id,
+            },
+        )
+    except Exception as exc:
+        await mark_project_memory_status(
+            project_id,
+            "failed",
+            command_id=None,
+            error_message=str(exc),
+        )
+        await mark_run_failed(run.id, str(exc))
+        raise
+
     await mark_project_memory_status(
         project_id,
         "queued",
         command_id=command_id,
         error_message=None,
     )
+    await record_step(
+        run.id,
+        title="记忆重建任务已入队",
+        step_type="system",
+        status="completed",
+        agent_name="project_harness",
+        output_json={"command_id": command_id},
+    )
     return {
         "project_id": project_id,
         "status": "queued",
         "message": "Project memory rebuild queued.",
         "command_id": command_id,
+        "run_id": run.id,
     }
 
 

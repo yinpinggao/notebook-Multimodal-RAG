@@ -19,6 +19,8 @@ export const QUERY_KEYS = {
   notebook: (id: string) => ['notebooks', id] as const,
   projects: ['projects'] as const,
   projectOverview: (id: string) => ['projects', id, 'overview'] as const,
+  projectRuns: (id: string) => ['projects', id, 'runs'] as const,
+  projectRun: (id: string, runId: string) => ['projects', id, 'runs', runId] as const,
   projectMemory: (id: string) => ['projects', id, 'memory'] as const,
   projectArtifacts: (id: string) => ['projects', id, 'artifacts'] as const,
   projectArtifact: (id: string, artifactId: string) => ['projects', id, 'artifacts', artifactId] as const,

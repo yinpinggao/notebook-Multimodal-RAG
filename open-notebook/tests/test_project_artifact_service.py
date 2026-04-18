@@ -16,7 +16,9 @@ from open_notebook.project_os.artifact_service import ArtifactSourceSnapshot
     "api.project_artifact_service.project_os_artifact_service.mark_project_artifact_status",
     new_callable=AsyncMock,
 )
+@patch("api.project_artifact_service.record_step", new_callable=AsyncMock)
 @patch("api.project_artifact_service.async_submit_command", new_callable=AsyncMock)
+@patch("api.project_artifact_service.create_project_run", new_callable=AsyncMock)
 @patch(
     "api.project_artifact_service.project_os_artifact_service.initialize_project_artifact",
     new_callable=AsyncMock,
@@ -27,7 +29,9 @@ async def test_queue_project_artifact_submits_generation_command(
     mock_get_project,
     mock_resolve_snapshot,
     mock_initialize_artifact,
+    mock_create_run,
     mock_submit_command,
+    mock_record_step,
     mock_mark_status,
 ):
     mock_get_project.return_value = ProjectSummary(
@@ -47,6 +51,11 @@ async def test_queue_project_artifact_submits_generation_command(
         summary="Demo summary",
         source_refs=["source:1#p1"],
     )
+    mock_create_run.return_value = type(
+        "Run",
+        (),
+        {"id": "run:artifact001"},
+    )()
     mock_initialize_artifact.return_value = ArtifactRecord(
         id="artifact:demo",
         project_id="project:demo",
@@ -91,8 +100,10 @@ async def test_queue_project_artifact_submits_generation_command(
         {
             "project_id": "project:demo",
             "artifact_id": "artifact:demo",
+            "run_id": "run:artifact001",
         },
     )
+    mock_record_step.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -100,7 +111,9 @@ async def test_queue_project_artifact_submits_generation_command(
     "api.project_artifact_service.project_os_artifact_service.mark_project_artifact_status",
     new_callable=AsyncMock,
 )
+@patch("api.project_artifact_service.record_step", new_callable=AsyncMock)
 @patch("api.project_artifact_service.async_submit_command", new_callable=AsyncMock)
+@patch("api.project_artifact_service.create_project_run", new_callable=AsyncMock)
 @patch(
     "api.project_artifact_service.project_os_artifact_service.update_project_artifact_source_snapshot",
     new_callable=AsyncMock,
@@ -116,7 +129,9 @@ async def test_regenerate_project_artifact_reuses_origin_and_requeues(
     mock_load_artifact,
     mock_resolve_snapshot,
     mock_update_snapshot,
+    mock_create_run,
     mock_submit_command,
+    mock_record_step,
     mock_mark_status,
 ):
     mock_get_project.return_value = ProjectSummary(
@@ -151,6 +166,11 @@ async def test_regenerate_project_artifact_reuses_origin_and_requeues(
         summary="Diff summary",
         source_refs=["source:1#p1", "source:2#p2"],
     )
+    mock_create_run.return_value = type(
+        "Run",
+        (),
+        {"id": "run:artifact002"},
+    )()
     mock_submit_command.return_value = "command:artifact:2"
     mock_mark_status.side_effect = [
         ArtifactRecord(
@@ -196,5 +216,7 @@ async def test_regenerate_project_artifact_reuses_origin_and_requeues(
         {
             "project_id": "project:demo",
             "artifact_id": "artifact:demo",
+            "run_id": "run:artifact002",
         },
     )
+    mock_record_step.assert_awaited_once()

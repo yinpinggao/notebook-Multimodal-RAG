@@ -9,7 +9,9 @@ from api.schemas import (
     ProjectOverviewResponse,
     ProjectTimelineEvent,
     RecentArtifactSummary,
+    RecentRunSummary,
 )
+from open_notebook.agent_harness import list_recent_run_summaries
 from open_notebook.domain.notebook import Source
 from open_notebook.jobs import async_submit_command
 from open_notebook.project_os import artifact_service as project_os_artifact_service
@@ -241,12 +243,21 @@ async def _recent_artifact_summaries(
     return summaries[:limit]
 
 
+async def _recent_run_summaries(
+    project_id: str,
+    *,
+    limit: int = 5,
+) -> list[RecentRunSummary]:
+    return await list_recent_run_summaries(project_id, limit=limit)
+
+
 async def get_project_overview(project_id: str) -> ProjectOverviewResponse:
     project = await project_workspace_service.get_project(project_id)
-    (sources, live_metrics), snapshot, recent_artifacts = await asyncio.gather(
+    (sources, live_metrics), snapshot, recent_artifacts, recent_runs = await asyncio.gather(
         _source_runtime_rows(project_id),
         project_os_overview_service.load_project_overview_snapshot(project_id),
         _recent_artifact_summaries(project_id),
+        _recent_run_summaries(project_id),
     )
 
     raw_topics = [
@@ -305,7 +316,7 @@ async def get_project_overview(project_id: str) -> ProjectOverviewResponse:
         risks=risks,
         timeline_events=timeline_events,
         recommended_questions=recommended_questions,
-        recent_runs=[],
+        recent_runs=recent_runs,
         recent_artifacts=recent_artifacts,
     )
 
