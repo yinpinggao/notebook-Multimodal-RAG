@@ -1,22 +1,30 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
+from loguru import logger
+
 from api.schemas import ProjectOverviewResponse, ProjectTimelineEvent
+from open_notebook.domain.notebook import Source
+from open_notebook.jobs import async_submit_command
+from open_notebook.project_os import overview_service as project_os_overview_service
+from open_notebook.storage.visual_assets import visual_asset_store
 
 from . import project_workspace_service
 
 DEFAULT_TOPICS = ["研究目标", "资料结构", "证据线索"]
 
 
-def _dedupe_strings(values: list[str | None]) -> list[str]:
+def _dedupe_strings(values: list[str | None], *, limit: int | None = None) -> list[str]:
     deduped: list[str] = []
-
     for value in values:
-        normalized = value.strip() if isinstance(value, str) else None
-        if normalized and normalized not in deduped:
-            deduped.append(normalized)
-
+        normalized = " ".join(str(value).strip().split()) if value else ""
+        if not normalized or normalized in deduped:
+            continue
+        deduped.append(normalized)
+        if limit and len(deduped) >= limit:
+            break
     return deduped
 
 
@@ -30,26 +38,30 @@ def _build_risks(
     risks: list[str] = []
 
     if source_count == 0:
-        risks.append("尚未导入资料，项目画像和证据回答还没有可依赖的基础材料。")
-
+        risks.append(
+            "尚未导入资料，项目画像和证据问答还没有可依赖的基础材料。"
+        )
     if processing_source_count > 0:
         risks.append(
-            f"{processing_source_count} 份资料仍在处理中，当前结论可能还不完整。"
+            f"{processing_source_count} 份资料仍在处理中，当前总览可能还不完整。"
         )
-
     if source_count > 0 and embedded_source_count == 0:
-        risks.append("文本检索索引还没有准备好，主题归纳和问答召回会受到影响。")
-
+        risks.append(
+            "文本检索索引还没有准备好，主题归纳和问答召回会受到影响。"
+        )
     if source_count > 0 and visual_ready_count == 0:
-        risks.append("视觉资料还没有建立索引，图表、版面和截图相关问题暂时不够稳。")
-
+        risks.append(
+            "视觉资料还没有建立索引，图表、版面和截图相关问题暂时不够稳。"
+        )
     if not risks:
-        risks.append("当前资料状态比较稳定，可以先从证据问答或项目综述开始。")
+        risks.append(
+            "当前资料状态比较稳定，可以先从证据问答或项目综述开始。"
+        )
 
     return risks
 
 
-def _build_timeline_events(
+def _fallback_timeline_events(
     *,
     project_id: str,
     project_created_at: str,
@@ -57,25 +69,25 @@ def _build_timeline_events(
     sources: list[dict[str, Any]],
     processing_source_count: int,
 ) -> list[ProjectTimelineEvent]:
+    timeline = [
+        ProjectTimelineEvent(
+            id=f"timeline:{project_id}:created",
+            title="创建项目空间",
+            description="项目工作台已经建立，可以开始整理资料、抽取画像并沉淀证据。",
+            occurred_at=project_created_at,
+            source_refs=[],
+        )
+    ]
+
     latest_source = sorted(
         sources,
         key=lambda source: str(source.get("updated", "")),
         reverse=True,
     )[:1]
 
-    timeline: list[ProjectTimelineEvent] = [
-        ProjectTimelineEvent(
-            id=f"timeline:{project_id}:created",
-            title="创建项目空间",
-            description="项目工作台已经建立，可以开始整理资料和沉淀证据。",
-            occurred_at=project_created_at,
-            source_refs=[],
-        )
-    ]
-
     if latest_source:
         source = latest_source[0]
-        source_id = str(source.get("id", ""))
+        source_id = str(source.get("id") or "")
         timeline.insert(
             0,
             ProjectTimelineEvent(
@@ -84,7 +96,7 @@ def _build_timeline_events(
                 description=(
                     f"{source.get('title') or '未命名资料'} 最近被更新，可继续补充主题和证据。"
                 ),
-                occurred_at=str(source.get("updated", "")),
+                occurred_at=str(source.get("updated") or project_updated_at),
                 source_refs=[source_id] if source_id else [],
             ),
         )
@@ -94,9 +106,9 @@ def _build_timeline_events(
             0,
             ProjectTimelineEvent(
                 id=f"timeline:{project_id}:processing",
-                title="资料处理中",
+                title="总览重建中",
                 description=(
-                    f"{processing_source_count} 份资料仍在建立索引，稍后适合重新生成项目画像。"
+                    f"{processing_source_count} 份资料仍在处理或建索引，稍后适合重新查看项目画像。"
                 ),
                 occurred_at=project_updated_at,
                 source_refs=[],
@@ -106,7 +118,12 @@ def _build_timeline_events(
     return timeline[:4]
 
 
-def _build_recommended_questions(topics: list[str], has_sources: bool) -> list[str]:
+def _build_recommended_questions(
+    topics: list[str],
+    *,
+    has_sources: bool,
+    risks: list[str],
+) -> list[str]:
     if not has_sources:
         return [
             "这个项目最值得先导入哪几类资料？",
@@ -115,18 +132,21 @@ def _build_recommended_questions(topics: list[str], has_sources: bool) -> list[s
         ]
 
     first_topic = topics[0] if topics else "核心主题"
-    second_topic = topics[1] if len(topics) > 1 else "项目目标"
-
-    return [
+    questions = [
         f"围绕“{first_topic}”目前最扎实的证据是什么？",
-        f"从“{second_topic}”出发，还缺哪些资料才能形成完整判断？",
-        "如果现在生成项目综述，最需要人工复核的部分会在哪里？",
+        "下一步最值得优先补看的资料是哪几份？",
     ]
 
+    if risks:
+        questions.append(f"针对这个风险，最需要补强或人工复核的地方是什么：{risks[0]}？")
+    else:
+        questions.append("如果现在生成项目综述，最需要人工复核的部分会在哪里？")
 
-async def get_project_overview(project_id: str) -> ProjectOverviewResponse:
-    project = await project_workspace_service.get_project(project_id)
-    sources = await project_workspace_service.seekdb_business_store.source_list_rows(
+    return questions[:3]
+
+
+async def _source_runtime_rows(project_id: str) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    rows = await project_workspace_service.seekdb_business_store.source_list_rows(
         notebook_id=project_id,
         limit=100,
         offset=0,
@@ -134,21 +154,69 @@ async def get_project_overview(project_id: str) -> ProjectOverviewResponse:
         sort_order="DESC",
     )
 
-    can_assess_processing = any("status" in source for source in sources)
-    can_assess_text_index = any("embedded" in source for source in sources)
-    can_assess_visual_index = any("visual_index_status" in source for source in sources)
+    processing_source_count = 0
+    embedded_source_count = 0
+    visual_ready_count = 0
+    
+    async def _enrich_source_row(row: dict[str, Any]) -> dict[str, Any]:
+        source = Source.model_validate(row)
+        source_status = None
+        index_stats = {"chunk_count": 0}
+        try:
+            source_status = await source.get_status()
+        except Exception as exc:
+            logger.warning(f"Failed to read source status for {source.id}: {exc}")
 
-    processing_source_count = sum(
-        1
-        for source in sources
-        if str(source.get("status") or "") in {"new", "queued", "running"}
-    )
-    embedded_source_count = sum(1 for source in sources if bool(source.get("embedded")))
-    visual_ready_count = sum(
-        1
-        for source in sources
-        if str(source.get("visual_index_status") or "") == "completed"
-    )
+        try:
+            index_stats = await source.get_index_stats()
+        except Exception as exc:
+            logger.warning(f"Failed to read index stats for {source.id}: {exc}")
+
+        try:
+            visual_summary = await visual_asset_store.source_index_summary(str(source.id))
+        except Exception as exc:
+            logger.warning(f"Failed to read visual index summary for {source.id}: {exc}")
+            visual_summary = {
+                "visual_index_status": None,
+                "visual_asset_count": 0,
+            }
+
+        embedded = int(index_stats.get("chunk_count") or 0) > 0
+        visual_ready = visual_summary.get("visual_index_status") == "completed"
+
+        return {
+            **row,
+            "status": source_status,
+            "embedded": embedded,
+            "embedded_chunks": int(index_stats.get("chunk_count") or 0),
+            "visual_index_status": visual_summary.get("visual_index_status"),
+            "visual_asset_count": visual_summary.get("visual_asset_count"),
+            "_derived_processing": source_status in {"new", "queued", "running"},
+            "_derived_embedded": embedded,
+            "_derived_visual_ready": visual_ready,
+        }
+
+    enriched_rows = await asyncio.gather(*[_enrich_source_row(row) for row in rows])
+
+    for row in enriched_rows:
+        if row.pop("_derived_processing", False):
+            processing_source_count += 1
+        if row.pop("_derived_embedded", False):
+            embedded_source_count += 1
+        if row.pop("_derived_visual_ready", False):
+            visual_ready_count += 1
+
+    return enriched_rows, {
+        "processing_source_count": processing_source_count,
+        "embedded_source_count": embedded_source_count,
+        "visual_ready_count": visual_ready_count,
+    }
+
+
+async def get_project_overview(project_id: str) -> ProjectOverviewResponse:
+    project = await project_workspace_service.get_project(project_id)
+    sources, live_metrics = await _source_runtime_rows(project_id)
+    snapshot = await project_os_overview_service.load_project_overview_snapshot(project_id)
 
     raw_topics = [
         topic
@@ -156,56 +224,56 @@ async def get_project_overview(project_id: str) -> ProjectOverviewResponse:
         for topic in (source.get("topics") or [])
         if isinstance(topic, str)
     ]
-    topics = _dedupe_strings(raw_topics)[:6]
-    effective_topics = topics or DEFAULT_TOPICS
-    keywords = _dedupe_strings(
+    fallback_topics = _dedupe_strings(raw_topics, limit=6) or DEFAULT_TOPICS
+    fallback_keywords = _dedupe_strings(
         [
-            *effective_topics,
-            "文本检索" if can_assess_text_index and embedded_source_count > 0 else None,
-            "视觉证据" if can_assess_visual_index and visual_ready_count > 0 else None,
-            "项目画像" if project.source_count > 0 else None,
-        ]
-    )[:8]
-    risks = _build_risks(
+            *fallback_topics,
+            "文本检索" if live_metrics["embedded_source_count"] > 0 else None,
+            "视觉证据" if live_metrics["visual_ready_count"] > 0 else None,
+        ],
+        limit=8,
+    )
+    fallback_risks = _build_risks(
         source_count=project.source_count,
-        embedded_source_count=embedded_source_count,
-        visual_ready_count=visual_ready_count,
-        processing_source_count=processing_source_count,
+        embedded_source_count=live_metrics["embedded_source_count"],
+        visual_ready_count=live_metrics["visual_ready_count"],
+        processing_source_count=live_metrics["processing_source_count"],
     )
 
-    if not can_assess_processing:
-        risks = [risk for risk in risks if "处理中" not in risk]
-    if not can_assess_text_index:
-        risks = [risk for risk in risks if "文本检索索引" not in risk]
-    if not can_assess_visual_index:
-        risks = [risk for risk in risks if "视觉资料" not in risk]
-    if (
-        project.source_count > 0
-        and not can_assess_processing
-        and not can_assess_text_index
-        and not can_assess_visual_index
-    ):
-        risks = []
+    topics = snapshot.topics if snapshot and snapshot.topics else fallback_topics
+    keywords = snapshot.keywords if snapshot and snapshot.keywords else fallback_keywords
+    risks = snapshot.risks if snapshot and snapshot.risks else fallback_risks
+    timeline_events = (
+        snapshot.timeline_events
+        if snapshot and snapshot.timeline_events
+        else _fallback_timeline_events(
+            project_id=project.id,
+            project_created_at=project.created_at,
+            project_updated_at=project.updated_at,
+            sources=sources,
+            processing_source_count=live_metrics["processing_source_count"],
+        )
+    )
+    recommended_questions = (
+        snapshot.recommended_questions
+        if snapshot and snapshot.recommended_questions
+        else _build_recommended_questions(
+            topics,
+            has_sources=project.source_count > 0,
+            risks=risks,
+        )
+    )
 
     return ProjectOverviewResponse(
         project=project,
         source_count=project.source_count,
         artifact_count=project.artifact_count,
         memory_count=project.memory_count,
-        topics=effective_topics,
+        topics=topics,
         keywords=keywords,
         risks=risks,
-        timeline_events=_build_timeline_events(
-            project_id=project.id,
-            project_created_at=project.created_at,
-            project_updated_at=project.updated_at,
-            sources=sources,
-            processing_source_count=processing_source_count,
-        ),
-        recommended_questions=_build_recommended_questions(
-            effective_topics,
-            project.source_count > 0,
-        ),
+        timeline_events=timeline_events,
+        recommended_questions=recommended_questions,
         recent_runs=[],
         recent_artifacts=[],
     )
@@ -214,9 +282,23 @@ async def get_project_overview(project_id: str) -> ProjectOverviewResponse:
 async def queue_project_overview_rebuild(project_id: str) -> dict[str, str | None]:
     await project_workspace_service.get_project(project_id)
 
+    import commands.project_commands  # noqa: F401
+
+    command_id = await async_submit_command(
+        "open_notebook",
+        "build_overview",
+        {"project_id": project_id},
+    )
+    await project_os_overview_service.mark_project_overview_status(
+        project_id,
+        "queued",
+        command_id=command_id,
+        error_message=None,
+    )
+
     return {
         "project_id": project_id,
         "status": "queued",
         "message": "Project overview rebuild queued.",
-        "command_id": None,
+        "command_id": command_id,
     }

@@ -8,6 +8,7 @@ from .embedding_commands import (
 )
 from .example_commands import analyze_data_command, process_text_command
 from .podcast_commands import generate_podcast_command
+from .project_commands import build_project_overview_command
 from .seekdb_sync_commands import (
     backfill_seekdb_indexes,
     delete_seekdb_entity,
@@ -35,6 +36,7 @@ __all__ = [
     "process_source_command",
     "process_text_command",
     "analyze_data_command",
+    "build_project_overview_command",
     # SeekDB sync commands
     "sync_seekdb_credential",
     "sync_seekdb_model",

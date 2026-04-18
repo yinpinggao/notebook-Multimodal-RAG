@@ -135,7 +135,7 @@ def test_rebuild_project_overview_returns_queued(mock_rebuild, client):
         "project_id": "project:demo",
         "status": "queued",
         "message": "Project overview rebuild queued.",
-        "command_id": None,
+        "command_id": "command:overview:1",
     }
 
     response = client.post("/api/projects/project:demo/overview/rebuild")
@@ -145,7 +145,7 @@ def test_rebuild_project_overview_returns_queued(mock_rebuild, client):
         "project_id": "project:demo",
         "status": "queued",
         "message": "Project overview rebuild queued.",
-        "command_id": None,
+        "command_id": "command:overview:1",
     }
 
 
