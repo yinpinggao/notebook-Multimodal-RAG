@@ -60,6 +60,75 @@ export interface ProjectOverviewResponse {
   recent_artifacts: RecentArtifactSummaryResponse[]
 }
 
+export type ProjectAskMode = 'auto' | 'text' | 'visual' | 'mixed'
+
+export interface EvidenceCardResponse {
+  id?: string | null
+  project_id?: string | null
+  thread_id?: string | null
+  source_name: string
+  source_id: string
+  page_no?: number | null
+  excerpt: string
+  citation_text: string
+  internal_ref: string
+  relevance_reason?: string | null
+  image_thumb?: string | null
+  score?: number | null
+}
+
+export interface MemoryUpdatePreviewResponse {
+  text: string
+  type: string
+  source_refs: string[]
+  confidence?: number | null
+}
+
+export interface ProjectAskResponse {
+  thread_id?: string | null
+  answer: string
+  confidence: number
+  evidence_cards: EvidenceCardResponse[]
+  memory_updates: MemoryUpdatePreviewResponse[]
+  run_id?: string | null
+  suggested_followups: string[]
+  mode: 'text' | 'visual' | 'mixed' | 'compare' | 'synthesis'
+}
+
+export interface EvidenceThreadMessageResponse {
+  id: string
+  type: string
+  content: string
+  timestamp?: string | null
+}
+
+export interface EvidenceThreadSummaryResponse {
+  id: string
+  project_id: string
+  title: string
+  created_at: string
+  updated_at: string
+  message_count: number
+  last_question?: string | null
+  last_answer_preview?: string | null
+}
+
+export interface EvidenceThreadDetailResponse extends EvidenceThreadSummaryResponse {
+  messages: EvidenceThreadMessageResponse[]
+  latest_response?: ProjectAskResponse | null
+}
+
+export interface ProjectAskRequest {
+  question: string
+  mode?: ProjectAskMode
+  thread_id?: string
+}
+
+export interface ProjectFollowupRequest {
+  question: string
+  mode?: ProjectAskMode
+}
+
 export interface CreateProjectRequest {
   name: string
   description?: string

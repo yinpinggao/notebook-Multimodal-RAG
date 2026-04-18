@@ -1,6 +1,11 @@
 import apiClient from './client'
 import {
   CreateProjectRequest,
+  EvidenceThreadDetailResponse,
+  EvidenceThreadSummaryResponse,
+  ProjectAskRequest,
+  ProjectAskResponse,
+  ProjectFollowupRequest,
   ProjectDeleteResponse,
   ProjectOverviewRebuildResponse,
   ProjectOverviewResponse,
@@ -31,6 +36,31 @@ export const projectsApi = {
   rebuildOverview: async (id: string) => {
     const response = await apiClient.post<ProjectOverviewRebuildResponse>(
       `/projects/${id}/overview/rebuild`
+    )
+    return response.data
+  },
+
+  ask: async (id: string, data: ProjectAskRequest) => {
+    const response = await apiClient.post<ProjectAskResponse>(`/projects/${id}/ask`, data)
+    return response.data
+  },
+
+  listThreads: async (id: string) => {
+    const response = await apiClient.get<EvidenceThreadSummaryResponse[]>(`/projects/${id}/threads`)
+    return response.data
+  },
+
+  getThread: async (id: string, threadId: string) => {
+    const response = await apiClient.get<EvidenceThreadDetailResponse>(
+      `/projects/${id}/threads/${encodeURIComponent(threadId)}`
+    )
+    return response.data
+  },
+
+  followup: async (id: string, threadId: string, data: ProjectFollowupRequest) => {
+    const response = await apiClient.post<ProjectAskResponse>(
+      `/projects/${id}/threads/${encodeURIComponent(threadId)}/followup`,
+      data
     )
     return response.data
   },

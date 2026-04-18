@@ -73,7 +73,7 @@ export default function ProjectLayout({
           <nav className="flex flex-wrap gap-2 border-b pb-4">
             {projectTabs.map((tab) => {
               const href = `/projects/${encodeURIComponent(notebookId || routeProjectId)}/${tab.href}`
-              const isActive = pathname === href
+              const isActive = pathname === href || pathname.startsWith(`${href}/`)
 
               return (
                 <Link
