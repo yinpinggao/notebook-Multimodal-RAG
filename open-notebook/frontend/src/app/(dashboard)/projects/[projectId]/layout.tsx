@@ -39,7 +39,7 @@ export default function ProjectLayout({
           <header className="space-y-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">Project Workspace</Badge>
-              <Badge variant="secondary">Mapped to {notebookId || 'notebook id'}</Badge>
+              <Badge variant="secondary">证据优先</Badge>
             </div>
 
             {isLoading ? (
@@ -54,16 +54,16 @@ export default function ProjectLayout({
                     {notebook?.name || '项目空间'}
                   </h1>
                   <p className="text-sm text-muted-foreground">
-                    {notebook?.description || '当前阶段这里仍复用 notebook 作为底层实体，后续再迁移为真正的 Project 模型。'}
+                    {notebook?.description || '把资料、证据和输出收进同一个项目空间，围绕一个主线持续推进。'}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
                   <Button asChild variant="outline" size="sm">
-                    <Link href={`/notebooks/${encodeURIComponent(notebookId)}`}>旧版工作区</Link>
+                    <Link href={`/notebooks/${encodeURIComponent(notebookId)}`}>资料工作区</Link>
                   </Button>
                   <Button asChild variant="outline" size="sm">
-                    <Link href={`/notebooks/${encodeURIComponent(notebookId)}/visual`}>Visual RAG</Link>
+                    <Link href={`/notebooks/${encodeURIComponent(notebookId)}/visual`}>视觉证据</Link>
                   </Button>
                 </div>
               </div>
