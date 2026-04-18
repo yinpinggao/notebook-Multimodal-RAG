@@ -315,6 +315,76 @@ export interface ProjectCompareExportResponse {
   content: string
 }
 
+export interface CommandExecutionRequest {
+  command: string
+  app: string
+  input: Record<string, unknown>
+}
+
+export interface CommandJobResponse {
+  job_id: string
+  status: string
+  message: string
+}
+
+export interface CommandJobStatusResponse {
+  job_id: string
+  status: string
+  result?: Record<string, unknown> | null
+  error_message?: string | null
+  created?: string | null
+  updated?: string | null
+  progress?: Record<string, unknown> | null
+  started_at?: string | null
+  completed_at?: string | null
+  retry_count?: number | null
+  app_name?: string | null
+  command_name?: string | null
+}
+
+export interface CommandJobListItemResponse extends CommandJobStatusResponse {
+  app_name: string
+  command_name: string
+  args?: Record<string, unknown> | null
+  started_at?: string | null
+  completed_at?: string | null
+  retry_count: number
+}
+
+export interface CommandJobCancelResponse {
+  job_id: string
+  cancelled: boolean
+}
+
+export type EvalMetricStatus = 'passed' | 'failed' | 'unavailable'
+
+export interface EvalMetricResultResponse {
+  metric: string
+  label: string
+  status: EvalMetricStatus
+  score?: number | null
+  threshold?: number | null
+  summary: string
+  details?: Record<string, unknown> | null
+}
+
+export interface ProjectEvalCommandInput {
+  project_id: string
+  thread_id?: string
+  compare_id?: string
+}
+
+export interface ProjectEvalOutputResponse {
+  success: boolean
+  project_id: string
+  metrics: EvalMetricResultResponse[]
+  passed_metrics: number
+  available_metrics: number
+  summary: string
+  thread_id?: string | null
+  compare_id?: string | null
+}
+
 export type ArtifactType =
   | 'project_summary'
   | 'literature_review'

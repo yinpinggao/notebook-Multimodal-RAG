@@ -35,6 +35,11 @@ export const projectsApi = {
     return response.data
   },
 
+  createDemo: async () => {
+    const response = await apiClient.post<ProjectSummaryResponse>('/projects/demo')
+    return response.data
+  },
+
   delete: async (id: string) => {
     const response = await apiClient.delete<ProjectDeleteResponse>(`/projects/${id}`)
     return response.data

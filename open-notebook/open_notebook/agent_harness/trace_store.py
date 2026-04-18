@@ -45,12 +45,15 @@ def utc_now() -> str:
     )
 
 
-def _strip_singleton_metadata(data: dict) -> dict:
-    return {
-        key: value
-        for key, value in data.items()
-        if key not in {"id", "created", "updated"}
+def _strip_singleton_metadata(data: dict, *, public_id: str | None = None) -> dict:
+    payload = {
+        key: value for key, value in data.items() if key not in {"created", "updated"}
     }
+    if public_id is None:
+        payload.pop("id", None)
+    else:
+        payload["id"] = public_id
+    return payload
 
 
 def _dedupe_ids(values: list[str]) -> list[str]:
@@ -95,14 +98,14 @@ async def save_agent_run(run: AgentRun) -> AgentRun:
         project_run_record_id(run.id),
         run.model_dump(mode="json"),
     )
-    return AgentRun.model_validate(_strip_singleton_metadata(saved))
+    return AgentRun.model_validate(_strip_singleton_metadata(saved, public_id=run.id))
 
 
 async def load_agent_run(run_id: str) -> AgentRun | None:
     data = await seekdb_business_store.get_singleton(project_run_record_id(run_id))
     if not data:
         return None
-    return AgentRun.model_validate(_strip_singleton_metadata(data))
+    return AgentRun.model_validate(_strip_singleton_metadata(data, public_id=run_id))
 
 
 async def load_agent_run_for_project(project_id: str, run_id: str) -> AgentRun:

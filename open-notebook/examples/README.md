@@ -1,3 +1,28 @@
+# Examples
+
+## 智研舱 Demo Bundle
+
+`examples/zhiyancang_demo/` contains the demo project materials used for the `ZYC-12` competition flow.
+
+Recommended entry points:
+
+- `zhiyancang_demo/README.md`
+- `zhiyancang_demo/competition_brief.md`
+- `zhiyancang_demo/solution_plan.md`
+- `zhiyancang_demo/evidence_brief.md`
+- `zhiyancang_demo/judge_focus.md`
+
+Use this bundle when you want to show the project-first workflow:
+
+- project workspace
+- evidence QA
+- compare
+- memory
+- outputs
+- runs / evals
+
+---
+
 # Docker Compose Examples
 
 This folder contains different `docker-compose.yml` configurations for various use cases.

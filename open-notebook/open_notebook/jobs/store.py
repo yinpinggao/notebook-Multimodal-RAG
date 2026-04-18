@@ -184,10 +184,18 @@ class JobStore:
                 "app_name": row.get("app_name"),
                 "command_name": row.get("command_name"),
                 "status": row.get("status"),
+                "args": _json_loads(row.get("args_json"), {}),
                 "result": _json_loads(row.get("result_json"), None),
                 "error_message": row.get("error_message"),
                 "created": str(row.get("created")) if row.get("created") else None,
                 "updated": str(row.get("updated")) if row.get("updated") else None,
+                "started_at": str(row.get("started_at"))
+                if row.get("started_at")
+                else None,
+                "completed_at": str(row.get("completed_at"))
+                if row.get("completed_at")
+                else None,
+                "retry_count": int(row.get("retry_count") or 0),
                 "progress": _json_loads(row.get("progress_json"), None),
             }
             for row in rows

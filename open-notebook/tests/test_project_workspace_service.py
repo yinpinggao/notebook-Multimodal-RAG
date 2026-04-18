@@ -2,7 +2,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from api.project_workspace_service import get_project, list_projects
+from api.project_workspace_service import (
+    create_demo_project,
+    get_project,
+    list_projects,
+)
+from api.schemas import ProjectSummary
 
 
 @pytest.mark.asyncio
@@ -91,3 +96,32 @@ async def test_get_project_populates_artifact_count(
     assert project.artifact_count == 4
     assert project.memory_count == 3
     assert project.last_run_at == "2026-04-18T09:45:00Z"
+
+
+@pytest.mark.asyncio
+@patch("api.project_workspace_service.get_project", new_callable=AsyncMock)
+@patch("api.project_workspace_service.ensure_demo_project", new_callable=AsyncMock)
+async def test_create_demo_project_returns_project_summary(
+    mock_ensure_demo_project,
+    mock_get_project,
+):
+    mock_ensure_demo_project.return_value = "project:demo"
+    mock_get_project.return_value = ProjectSummary(
+        id="project:demo",
+        name="智研舱 Demo 项目",
+        description="用于 3 分钟比赛演示的预置项目空间。",
+        status="active",
+        created_at="2026-04-19T08:00:00Z",
+        updated_at="2026-04-19T08:05:00Z",
+        source_count=2,
+        artifact_count=1,
+        memory_count=2,
+        last_run_at="2026-04-19T08:05:00Z",
+    )
+
+    project = await create_demo_project()
+
+    assert project.id == "project:demo"
+    assert project.name == "智研舱 Demo 项目"
+    mock_ensure_demo_project.assert_awaited_once_with()
+    mock_get_project.assert_awaited_once_with("project:demo")

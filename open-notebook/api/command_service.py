@@ -14,6 +14,20 @@ class CommandService:
     """Generic service layer for command operations"""
 
     @staticmethod
+    def _retry_args(command_args: Dict[str, Any]) -> Dict[str, Any]:
+        sanitized_args = dict(command_args)
+        sanitized_args.pop("run_id", None)
+        return sanitized_args
+
+    @staticmethod
+    def _ensure_commands_loaded() -> None:
+        try:
+            import commands  # noqa: F401
+        except ImportError as import_err:
+            logger.error(f"Failed to import command modules: {import_err}")
+            raise ValueError("Command modules not available") from import_err
+
+    @staticmethod
     async def submit_command_job(
         module_name: str,
         command_name: str,
@@ -22,13 +36,7 @@ class CommandService:
     ) -> str:
         """Submit a generic command job for background processing"""
         try:
-            # Ensure command modules are imported before submitting
-            # This is needed because submit_command validates against local registry
-            try:
-                import commands.podcast_commands  # noqa: F401
-            except ImportError as import_err:
-                logger.error(f"Failed to import command modules: {import_err}")
-                raise ValueError("Command modules not available")
+            CommandService._ensure_commands_loaded()
 
             cmd_id = await async_submit_command(
                 module_name,
@@ -48,24 +56,66 @@ class CommandService:
             raise
 
     @staticmethod
+    async def retry_command_job(job_id: str) -> str:
+        record = await job_store.get_job_record(job_id)
+        if not record:
+            raise ValueError("Command job not found")
+        if record.status not in {"failed", "cancelled"}:
+            raise ValueError("Only failed or cancelled jobs can be retried")
+
+        CommandService._ensure_commands_loaded()
+        retried_job_id = await async_submit_command(
+            record.app_name,
+            record.command_name,
+            CommandService._retry_args(record.args),
+        )
+        await job_store.update_job(
+            retried_job_id,
+            retry_count=record.retry_count + 1,
+        )
+        return retried_job_id
+
+    @staticmethod
     async def get_command_status(job_id: str) -> Dict[str, Any]:
         """Get status of any command job"""
         try:
-            status = await get_command_status(job_id)
+            record = await job_store.get_job_record(job_id)
+            if not record:
+                status = await get_command_status(job_id)
+                return {
+                    "job_id": job_id,
+                    "status": status.status if status else "unknown",
+                    "result": status.result if status else None,
+                    "error_message": getattr(status, "error_message", None)
+                    if status
+                    else None,
+                    "created": str(status.created)
+                    if status and hasattr(status, "created") and status.created
+                    else None,
+                    "updated": str(status.updated)
+                    if status and hasattr(status, "updated") and status.updated
+                    else None,
+                    "progress": getattr(status, "progress", None) if status else None,
+                    "started_at": None,
+                    "completed_at": None,
+                    "retry_count": None,
+                    "app_name": None,
+                    "command_name": None,
+                }
+
             return {
-                "job_id": job_id,
-                "status": status.status if status else "unknown",
-                "result": status.result if status else None,
-                "error_message": getattr(status, "error_message", None)
-                if status
-                else None,
-                "created": str(status.created)
-                if status and hasattr(status, "created") and status.created
-                else None,
-                "updated": str(status.updated)
-                if status and hasattr(status, "updated") and status.updated
-                else None,
-                "progress": getattr(status, "progress", None) if status else None,
+                "job_id": record.job_id,
+                "status": record.status,
+                "result": record.result,
+                "error_message": record.error_message,
+                "created": record.created,
+                "updated": record.updated,
+                "progress": record.progress,
+                "started_at": record.started_at,
+                "completed_at": record.completed_at,
+                "retry_count": record.retry_count,
+                "app_name": record.app_name,
+                "command_name": record.command_name,
             }
         except Exception as e:
             logger.error(f"Failed to get command status: {e}")

@@ -9,6 +9,7 @@ from open_notebook.memory_center import count_project_memories
 from open_notebook.domain.notebook import Notebook
 from open_notebook.exceptions import NotFoundError
 from open_notebook.project_os import artifact_service as project_os_artifact_service
+from open_notebook.project_os.demo_service import ensure_demo_project
 from open_notebook.seekdb import seekdb_business_store
 
 
@@ -139,6 +140,11 @@ async def create_project(name: str, description: str = "") -> ProjectSummary:
             return _row_to_project_summary(row)
 
     return _notebook_to_project_summary(notebook)
+
+
+async def create_demo_project() -> ProjectSummary:
+    project_id = await ensure_demo_project()
+    return await get_project(project_id)
 
 
 async def delete_project(

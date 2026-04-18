@@ -1,6 +1,15 @@
 # Developer Guide
 
-This guide is for developers working on Open Notebook. For end-user documentation, see [README.md](README.md) and [docs/](docs/).
+This repo now carries a project-first product narrative: **智研舱 / ZhiyanCang**.
+
+Open Notebook remains the open-source capability base. ZhiyanCang is the Project Memory Copilot experience built on top of it.
+
+For the demo materials and operator script used in `ZYC-12`, start here:
+
+- [docs/demo-script.md](docs/demo-script.md)
+- [examples/zhiyancang_demo/README.md](examples/zhiyancang_demo/README.md)
+
+For end-user documentation, see [README.md](README.md) and [docs/](docs/).
 
 ## Quick Start for Development
 

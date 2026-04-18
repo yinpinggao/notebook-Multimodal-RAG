@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { AlertCircle, Download, GitCompareArrows } from 'lucide-react'
 
@@ -10,12 +10,14 @@ import { CompareSummary } from '@/components/compare/compare-summary'
 import { ConflictList } from '@/components/compare/conflict-list'
 import { DiffTable } from '@/components/compare/diff-table'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   useCreateProjectCompare,
   useExportProjectCompare,
   useProjectCompare,
+  useProjectCompares,
 } from '@/lib/hooks/use-project-compare'
 import { useNotebookSources } from '@/lib/hooks/use-sources'
 import { projectIdToNotebookId } from '@/lib/project-alias'
@@ -35,6 +37,10 @@ export default function ProjectComparePage() {
     isLoading: sourcesLoading,
     error: sourcesError,
   } = useNotebookSources(projectId)
+  const {
+    data: compares = [],
+    error: comparesError,
+  } = useProjectCompares(projectId)
   const createCompare = useCreateProjectCompare(projectId)
   const exportCompare = useExportProjectCompare(projectId)
   const {
@@ -42,6 +48,12 @@ export default function ProjectComparePage() {
     isLoading: compareLoading,
     error: compareError,
   } = useProjectCompare(projectId, activeCompareId || undefined)
+
+  useEffect(() => {
+    if (!activeCompareId && compares.length > 0) {
+      setActiveCompareId(compares[0].id)
+    }
+  }, [activeCompareId, compares])
 
   const handleCreateCompare = async (request: ProjectCompareRequest) => {
     setMarkdownPreview('')
@@ -93,6 +105,50 @@ export default function ProjectComparePage() {
           </CardDescription>
         </CardHeader>
       </Card>
+
+      {comparesError ? (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>已有对比列表加载失败</AlertTitle>
+          <AlertDescription>{formatApiError(comparesError)}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {compares.length > 0 ? (
+        <Card className="border-border/70">
+          <CardHeader>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <CardTitle>已有对比</CardTitle>
+                <CardDescription>
+                  Demo 预置结果和历史对比会优先出现在这里，进入页面后会自动打开最近一条。
+                </CardDescription>
+              </div>
+              <Badge variant="outline">{compares.length} 条</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {compares.map((item) => (
+              <Button
+                key={item.id}
+                type="button"
+                variant={item.id === activeCompareId ? 'default' : 'outline'}
+                size="sm"
+                className="max-w-full justify-start"
+                onClick={() => {
+                  setMarkdownPreview('')
+                  setActiveCompareId(item.id)
+                }}
+              >
+                <span className="truncate">
+                  {item.source_a_title} / {item.source_b_title}
+                </span>
+                <span className="text-xs opacity-80">{item.status}</span>
+              </Button>
+            ))}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {sourcesLoading ? (
         <div className="flex min-h-[20rem] items-center justify-center rounded-lg border border-dashed border-border/70">

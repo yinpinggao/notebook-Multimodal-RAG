@@ -79,6 +79,33 @@ def test_create_project_returns_project_summary(mock_create_project, client):
 
 
 @patch(
+    "api.routers.projects.project_workspace_service.create_demo_project",
+    new_callable=AsyncMock,
+)
+def test_create_demo_project_returns_project_summary(mock_create_demo_project, client):
+    mock_create_demo_project.return_value = ProjectSummary(
+        id="project:demo",
+        name="智研舱 Demo 项目",
+        description="用于 3 分钟比赛演示的预置项目空间。",
+        status="active",
+        created_at="2026-04-19T08:00:00Z",
+        updated_at="2026-04-19T08:05:00Z",
+        source_count=2,
+        artifact_count=1,
+        memory_count=2,
+        last_run_at="2026-04-19T08:05:00Z",
+    )
+
+    response = client.post("/api/projects/demo")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == "project:demo"
+    assert data["name"] == "智研舱 Demo 项目"
+    assert data["artifact_count"] == 1
+
+
+@patch(
     "api.routers.projects.project_overview_service.get_project_overview",
     new_callable=AsyncMock,
 )

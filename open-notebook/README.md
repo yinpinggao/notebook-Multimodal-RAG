@@ -15,10 +15,11 @@
     <img src="docs/assets/hero.svg" alt="Logo">
   </a>
 
-  <h3 align="center">Open Notebook</h3>
+  <h3 align="center">智研舱 / ZhiyanCang</h3>
 
   <p align="center">
-    An open source, privacy-focused alternative to Google's Notebook LM!
+    Project Memory Copilot built on Open Notebook.
+    <br />Project-first workspace for evidence, compare, memory, outputs, and runs.
     <br /><strong>Join our <a href="https://discord.gg/37XJPXfz2w">Discord server</a> for help, to share workflow ideas, and suggest features!</strong>
     <br />
     <a href="https://www.open-notebook.ai"><strong>Checkout our website »</strong></a>
@@ -50,26 +51,27 @@
   <a href="https://zdoc.app/zh/lfnovo/open-notebook">中文</a>
 </div>
 
-## A private, multi-model, 100% local, full-featured alternative to Notebook LM
+## A private, multi-model project workspace built on Open Notebook
 
 ![New Notebook](docs/assets/asset_list.png)
 
-In a world dominated by Artificial Intelligence, having the ability to think 🧠 and acquire new knowledge 💡, is a skill that should not be a privilege for a few, nor restricted to a single provider.
+ZhiyanCang turns the existing Open Notebook foundation into a project-first workflow for research, competitions, proposals, and other long-running knowledge work.
 
-**Open Notebook empowers you to:**
-- 🔒 **Control your data** - Keep your research private and secure
-- 🤖 **Choose your AI models** - Support for 16+ providers including OpenAI, Anthropic, Ollama, LM Studio, and more
-- 📚 **Organize multi-modal content** - PDFs, videos, audio, web pages, and more
-- 🎙️ **Generate professional podcasts** - Advanced multi-speaker podcast generation
-- 🔍 **Search intelligently** - Full-text and vector search across all your content
-- 💬 **Chat with context** - AI conversations powered by your research
-- 🌐 **Multi-language UI** - English, Portuguese, Chinese (Simplified & Traditional), Japanese, Russian, and Bengali support
+**ZhiyanCang focuses the product around:**
+- 🔒 **Project-scoped privacy** - Keep research, proposal, and competition material in one workspace
+- 🤖 **Model flexibility** - Use the Open Notebook multi-provider foundation with 16+ providers
+- 📚 **Evidence-first knowledge work** - Organize PDFs, slides, audio, web pages, and other sources around a project
+- 🔍 **Evidence QA and compare** - Answer with citations and inspect structured differences between documents
+- 🧠 **Project memory** - Retain stable facts with traceable source references
+- 📝 **Outputs and runs** - Turn evidence into deliverables and keep the execution trail visible
 
-Learn more about our project at [https://www.open-notebook.ai](https://www.open-notebook.ai)
+Open Notebook remains the open-source engine underneath. ZhiyanCang is the product narrative and workspace flow used for the project experience in this repository.
+
+Demo materials for the competition flow live in [examples/zhiyancang_demo/](examples/zhiyancang_demo/) and the operator script lives in [docs/demo-script.md](docs/demo-script.md).
 
 ---
 
-## 🆚 Open Notebook vs Google Notebook LM
+## 🆚 Open Notebook Foundation vs Google Notebook LM
 
 | Feature | Open Notebook | Google Notebook LM | Advantage |
 |---------|---------------|--------------------|-----------|
@@ -83,7 +85,7 @@ Learn more about our project at [https://www.open-notebook.ai](https://www.open-
 | **Customization** | Open source, fully customizable | Closed system | Unlimited extensibility |
 | **Cost** | Pay only for AI usage | Free tier + Monthly subscription | Transparent and controllable |
 
-**Why Choose Open Notebook?**
+**Why ZhiyanCang Builds on Open Notebook**
 - 🔒 **Privacy First**: Your sensitive research stays completely private
 - 💰 **Cost Control**: Choose cheaper AI providers or run locally with Ollama
 - 🎙️ **Better Podcasts**: Full script control and multi-speaker flexibility vs limited 2-speaker deep-dive format
@@ -177,7 +179,7 @@ Wait 15-20 seconds, then open: **http://localhost:8502**
 4. Paste your API key and click **Save**
 5. Click **Test Connection** → **Discover Models** → **Register Models**
 
-Done! You're ready to create your first notebook.
+Done! You're ready to create your first project workspace.
 
 > **Need an API key?** Get one from:
 > [OpenAI](https://platform.openai.com/api-keys) · [Anthropic](https://console.anthropic.com/) · [Google](https://aistudio.google.com/) · [Groq](https://console.groq.com/) (free tier)

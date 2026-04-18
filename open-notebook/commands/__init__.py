@@ -2,6 +2,7 @@
 
 from .artifact_commands import generate_artifact_command
 from .compare_commands import compare_sources_command
+from .eval_commands import run_project_eval_command
 from .embedding_commands import (
     embed_insight_command,
     embed_note_command,
@@ -43,6 +44,7 @@ __all__ = [
     "build_project_overview_command",
     "refresh_project_memory_command",
     "compare_sources_command",
+    "run_project_eval_command",
     # SeekDB sync commands
     "sync_seekdb_credential",
     "sync_seekdb_model",

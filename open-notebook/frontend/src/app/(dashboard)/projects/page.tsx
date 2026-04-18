@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { AlertCircle, Compass, FolderOpenDot, History, Sparkles } from 'lucide-react'
 
 import { EmptyState } from '@/components/common/EmptyState'
@@ -12,13 +13,17 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useCreateDialogs } from '@/lib/hooks/use-create-dialogs'
-import { useProjects } from '@/lib/hooks/use-projects'
+import { useCreateDemoProject, useProjects } from '@/lib/hooks/use-projects'
 import { formatApiError } from '@/lib/utils/error-handler'
 import {
   ProjectWorkspaceSummary,
   formatProjectTimestamp,
   projectSummaryToWorkspaceSummary,
 } from '@/lib/project-workspace'
+
+function isDemoProject(project: ProjectWorkspaceSummary) {
+  return /demo|智研舱/i.test(`${project.name} ${project.description}`)
+}
 
 function buildRecentActivity(projects: ProjectWorkspaceSummary[]) {
   return [...projects]
@@ -52,7 +57,9 @@ function buildRecentOutputSuggestions(projects: ProjectWorkspaceSummary[]) {
 }
 
 export default function ProjectsPage() {
+  const router = useRouter()
   const { openNotebookDialog } = useCreateDialogs()
+  const createDemoProject = useCreateDemoProject()
   const {
     data: projectSummaries = [],
     isLoading,
@@ -61,12 +68,16 @@ export default function ProjectsPage() {
   const projects = projectSummaries.map((project) =>
     projectSummaryToWorkspaceSummary(project)
   )
+  const demoProject = projects.find(isDemoProject)
   const recentActivity = buildRecentActivity(projects)
   const outputSuggestions = buildRecentOutputSuggestions(projects)
-  const demoTarget =
-    projects[0]?.id
-      ? `/projects/${encodeURIComponent(projects[0].id)}/overview`
-      : '/projects/new'
+
+  const handleCreateOrOpenDemo = async () => {
+    try {
+      const project = await createDemoProject.mutateAsync()
+      router.push(`/projects/${encodeURIComponent(project.id)}/overview`)
+    } catch {}
+  }
 
   return (
     <AppShell>
@@ -88,6 +99,15 @@ export default function ProjectsPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  void handleCreateOrOpenDemo()
+                }}
+                disabled={createDemoProject.isPending}
+              >
+                {createDemoProject.isPending ? '正在准备 Demo...' : '创建 / 打开 Demo 项目'}
+              </Button>
               <Button onClick={openNotebookDialog}>新建项目</Button>
               <Button asChild variant="outline">
                 <Link href="/projects/new">打开新建页</Link>
@@ -159,9 +179,46 @@ export default function ProjectsPage() {
                       进入一个项目空间，先看主题、风险和时间线，再跳去证据工作台继续提问。
                     </p>
                   </div>
-                  <Button asChild className="w-full">
-                    <Link href={demoTarget}>打开示例路线</Link>
-                  </Button>
+                  <div className="grid gap-2">
+                    <Button
+                      className="w-full"
+                      onClick={() => {
+                        void handleCreateOrOpenDemo()
+                      }}
+                      disabled={createDemoProject.isPending}
+                    >
+                      {createDemoProject.isPending ? '正在准备 Demo...' : '创建 / 打开 Demo 项目'}
+                    </Button>
+                    {demoProject ? (
+                      <Button asChild variant="outline" className="w-full">
+                        <Link href={`/projects/${encodeURIComponent(demoProject.id)}/overview`}>
+                          打开示例路线
+                        </Link>
+                      </Button>
+                    ) : (
+                      <div className="rounded-md border border-dashed border-border/70 p-3 text-sm text-muted-foreground">
+                        Demo 项目创建后，这里会直接打开它的总览页。
+                      </div>
+                    )}
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Button asChild variant="outline">
+                        <Link href="/admin/evals">评测中心</Link>
+                      </Button>
+                      <Button asChild variant="outline">
+                        <Link href="/admin/jobs">任务队列</Link>
+                      </Button>
+                    </div>
+                  </div>
+
+                  {createDemoProject.error ? (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertTitle>Demo 项目暂时不可用</AlertTitle>
+                      <AlertDescription>
+                        {formatApiError(createDemoProject.error)}
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
                 </CardContent>
               </Card>
 
@@ -214,14 +271,14 @@ export default function ProjectsPage() {
                 <CardContent>
                   <div className="space-y-3">
                     {outputSuggestions.map((item) => (
-                    <div
-                      key={item}
-                      className="rounded-md border border-border/70 px-3 py-3 text-sm"
-                    >
-                      <span className="break-words">{item}</span>
-                    </div>
-                  ))}
-                </div>
+                      <div
+                        key={item}
+                        className="rounded-md border border-border/70 px-3 py-3 text-sm"
+                      >
+                        <span className="break-words">{item}</span>
+                      </div>
+                    ))}
+                  </div>
                 </CardContent>
               </Card>
             </aside>

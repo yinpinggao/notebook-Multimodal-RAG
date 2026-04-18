@@ -65,6 +65,18 @@ async def create_project(project: NotebookCreate):
         ) from e
 
 
+@router.post("/projects/demo", response_model=ProjectSummary)
+async def create_demo_project():
+    try:
+        return await project_workspace_service.create_demo_project()
+    except Exception as e:
+        logger.error(f"Error creating demo project: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating demo project: {e}",
+        ) from e
+
+
 @router.delete("/projects/{project_id}", response_model=ProjectDeleteResponse)
 async def delete_project(
     project_id: str,

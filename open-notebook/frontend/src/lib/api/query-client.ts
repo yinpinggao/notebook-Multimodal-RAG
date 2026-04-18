@@ -28,6 +28,13 @@ export const QUERY_KEYS = {
   projectCompare: (id: string, compareId: string) => ['projects', id, 'compare', compareId] as const,
   projectThreads: (id: string) => ['projects', id, 'threads'] as const,
   projectThread: (id: string, threadId: string) => ['projects', id, 'threads', threadId] as const,
+  commands: ['commands'] as const,
+  commandJobs: (filters?: {
+    commandFilter?: string
+    statusFilter?: string
+    limit?: number
+  }) => ['commands', 'jobs', filters ?? {}] as const,
+  commandJob: (jobId: string) => ['commands', 'jobs', jobId] as const,
   notes: (notebookId?: string) => ['notes', notebookId] as const,
   note: (id: string) => ['notes', id] as const,
   sources: (notebookId?: string) => ['sources', notebookId] as const,
