@@ -299,7 +299,8 @@ class TestSourceDomain:
         """Test that vectorize() submits embed_source command when text is valid."""
         source = Source(id="source:test_valid", title="Test", full_text="Real content")
         with patch(
-            "open_notebook.domain.notebook.submit_command", return_value="command:123"
+            "open_notebook.domain.notebook.async_submit_command",
+            new=AsyncMock(return_value="command:123"),
         ) as mock_submit:
             result = await source.vectorize()
             mock_submit.assert_called_once_with(

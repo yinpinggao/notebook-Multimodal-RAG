@@ -1,4 +1,9 @@
-"""Domain models for Open Notebook."""
+"""Project-facing API contract exports.
+
+This module provides a stable API-layer import path for the new project,
+evidence, memory, artifact, and run schemas without changing existing router
+implementations yet.
+"""
 
 from open_notebook.domain.artifacts import ArtifactRecord
 from open_notebook.domain.evidence import (

@@ -1,37 +1,37 @@
-"""Domain models for Open Notebook."""
+"""Stable API schema imports for Project Memory Copilot contracts."""
 
-from open_notebook.domain.artifacts import ArtifactRecord
-from open_notebook.domain.evidence import (
+from api.schemas.project_contracts import (
+    AgentRun,
+    AgentStep,
+    ArtifactRecord,
     AskResponse,
     CompareItem,
     CompareSummary,
     EvidenceCard,
+    MemoryRecord,
     MemoryUpdatePreview,
-)
-from open_notebook.domain.memory import MemoryRecord, SourceReference
-from open_notebook.domain.projects import (
     ProjectOverviewResponse,
     ProjectSummary,
     ProjectTimelineEvent,
     RecentArtifactSummary,
     RecentRunSummary,
+    SourceReference,
 )
-from open_notebook.domain.runs import AgentRun, AgentStep
 
 __all__ = [
+    "AgentRun",
+    "AgentStep",
     "ArtifactRecord",
     "AskResponse",
     "CompareItem",
     "CompareSummary",
     "EvidenceCard",
-    "MemoryUpdatePreview",
     "MemoryRecord",
-    "SourceReference",
+    "MemoryUpdatePreview",
     "ProjectOverviewResponse",
     "ProjectSummary",
     "ProjectTimelineEvent",
     "RecentArtifactSummary",
     "RecentRunSummary",
-    "AgentRun",
-    "AgentStep",
+    "SourceReference",
 ]

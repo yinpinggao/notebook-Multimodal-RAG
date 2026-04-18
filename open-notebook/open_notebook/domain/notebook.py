@@ -397,6 +397,9 @@ class Source(ObjectModel):
             if not self.full_text or not self.full_text.strip():
                 raise ValueError(f"Source {self.id} has no text to vectorize")
 
+            # Ensure embedding commands are registered before job submission.
+            import commands.embedding_commands  # noqa: F401
+
             # Submit the embed_source command
             command_id = await async_submit_command(
                 "open_notebook",
