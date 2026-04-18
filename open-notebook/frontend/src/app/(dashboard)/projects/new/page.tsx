@@ -37,7 +37,7 @@ export default function NewProjectPage() {
             <CardHeader>
               <CardTitle>新建项目</CardTitle>
               <CardDescription>
-                第一阶段继续复用现有 notebook 创建流程。也可以直接打开预置 Demo 项目，跳过手动建空项目。
+                可以直接进入智研舱 Demo 项目，也可以从现有资料创建新的项目空间。
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

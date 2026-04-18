@@ -12,8 +12,8 @@ import { I18nProvider } from "@/components/providers/I18nProvider";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Open Notebook",
-  description: "Privacy-focused research and knowledge management",
+  title: "智研舱 / ZhiyanCang",
+  description: "Project Memory Copilot for evidence, compare, memory, outputs, and runs",
 };
 
 export default function RootLayout({

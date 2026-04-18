@@ -121,12 +121,15 @@ def _utc_now() -> str:
     )
 
 
-def _strip_singleton_metadata(data: dict) -> dict:
-    return {
-        key: value
-        for key, value in data.items()
-        if key not in {"id", "created", "updated"}
+def _strip_singleton_metadata(data: dict, *, public_id: str | None = None) -> dict:
+    payload = {
+        key: value for key, value in data.items() if key not in {"created", "updated"}
     }
+    if public_id is None:
+        payload.pop("id", None)
+    else:
+        payload["id"] = public_id
+    return payload
 
 
 def _normalize_text(value: str) -> str:
@@ -577,7 +580,9 @@ async def load_project_compare(compare_id: str) -> ProjectCompareRecord | None:
     data = await seekdb_business_store.get_singleton(project_compare_record_id(compare_id))
     if not data:
         return None
-    return ProjectCompareRecord.model_validate(_strip_singleton_metadata(data))
+    return ProjectCompareRecord.model_validate(
+        _strip_singleton_metadata(data, public_id=compare_id)
+    )
 
 
 async def load_project_compare_for_project(
@@ -612,7 +617,9 @@ async def save_project_compare(record: ProjectCompareRecord) -> ProjectCompareRe
         project_compare_record_id(record.id),
         record.model_dump(mode="json"),
     )
-    return ProjectCompareRecord.model_validate(_strip_singleton_metadata(saved))
+    return ProjectCompareRecord.model_validate(
+        _strip_singleton_metadata(saved, public_id=record.id)
+    )
 
 
 async def mark_project_compare_status(

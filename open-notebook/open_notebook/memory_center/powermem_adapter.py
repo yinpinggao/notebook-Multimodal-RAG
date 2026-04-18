@@ -55,12 +55,15 @@ def _utc_now() -> str:
     )
 
 
-def _strip_singleton_metadata(data: dict) -> dict:
-    return {
-        key: value
-        for key, value in data.items()
-        if key not in {"id", "created", "updated"}
+def _strip_singleton_metadata(data: dict, *, public_id: str | None = None) -> dict:
+    payload = {
+        key: value for key, value in data.items() if key not in {"created", "updated"}
     }
+    if public_id is None:
+        payload.pop("id", None)
+    else:
+        payload["id"] = public_id
+    return payload
 
 
 def _dedupe_ids(values: list[str]) -> list[str]:
@@ -115,7 +118,9 @@ async def save_project_memory(record: StoredMemoryRecord) -> StoredMemoryRecord:
         project_memory_record_id(record.id),
         record.model_dump(mode="json"),
     )
-    return StoredMemoryRecord.model_validate(_strip_singleton_metadata(saved))
+    return StoredMemoryRecord.model_validate(
+        _strip_singleton_metadata(saved, public_id=record.id)
+    )
 
 
 async def load_stored_project_memory(memory_id: str) -> StoredMemoryRecord | None:
@@ -124,7 +129,9 @@ async def load_stored_project_memory(memory_id: str) -> StoredMemoryRecord | Non
     )
     if not data:
         return None
-    return StoredMemoryRecord.model_validate(_strip_singleton_metadata(data))
+    return StoredMemoryRecord.model_validate(
+        _strip_singleton_metadata(data, public_id=memory_id)
+    )
 
 
 async def load_stored_project_memory_for_project(

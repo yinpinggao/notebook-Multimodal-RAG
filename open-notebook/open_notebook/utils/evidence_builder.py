@@ -80,6 +80,45 @@ def _format_result_block(index: int, row: dict[str, Any]) -> str:
     ).strip()
 
 
+def _trim_fallback_text(value: Any, *, limit: int = 1200) -> str:
+    normalized = " ".join(str(value or "").strip().split())
+    return normalized[:limit] if normalized else "当前资料暂无可展示摘要。"
+
+
+def _fallback_source_row(context: dict[str, Any]) -> dict[str, Any]:
+    source_id = str(context.get("id") or "")
+    title = str(context.get("title") or "未命名资料")
+    return {
+        "source_id": source_id,
+        "parent_id": source_id,
+        "id": source_id,
+        "title": title,
+        "filename": title,
+        "match": _trim_fallback_text(context.get("full_text")),
+        "citation_text": f"引用：{title} | 内部引用：[{source_id}]",
+        "internal_ref": source_id,
+        "source_kind": "source",
+        "entity_type": "source",
+    }
+
+
+def _fallback_note_row(context: dict[str, Any]) -> dict[str, Any]:
+    note_id = str(context.get("id") or "")
+    title = str(context.get("title") or "未命名笔记")
+    return {
+        "source_id": note_id,
+        "parent_id": note_id,
+        "id": note_id,
+        "title": title,
+        "filename": title,
+        "match": _trim_fallback_text(context.get("content")),
+        "citation_text": f"引用：{title} | 内部引用：[{note_id}]",
+        "internal_ref": note_id,
+        "source_kind": "note",
+        "entity_type": "note",
+    }
+
+
 async def build_multimodal_evidence(
     query: str,
     *,
@@ -137,47 +176,24 @@ async def build_multimodal_evidence(
     if not results and fallback_source_id:
         source = await Source.get(fallback_source_id)
         if source:
-            context = await source.get_context(context_size="long")
-            return {
-                "results": [],
-                "context_text": str(context),
-                "context_indicators": {
-                    "sources": [fallback_source_id],
-                    "insights": [],
-                    "notes": [],
-                },
-            }
+            results = [_fallback_source_row(await source.get_context(context_size="long"))]
 
-    if not results and source_ids:
-        source_contexts = []
-        indicators = {"sources": [], "insights": [], "notes": note_ids}
+    if not results:
+        fallback_results: list[dict[str, Any]] = []
         for source_id in source_ids[:3]:
             source = await Source.get(source_id)
             if source:
-                source_contexts.append(str(await source.get_context(context_size="long")))
-                indicators["sources"].append(source_id)
-        if source_contexts:
-            return {
-                "results": [],
-                "context_text": "\n\n".join(source_contexts),
-                "context_indicators": indicators,
-            }
-
-    if not results and note_ids:
-        fallback_notes = []
+                fallback_results.append(
+                    _fallback_source_row(await source.get_context(context_size="long"))
+                )
         for note_id in note_ids[:3]:
             note = await Note.get(note_id)
             if note:
-                fallback_notes.append(str(note.get_context(context_size="long")))
-        return {
-            "results": [],
-            "context_text": "\n\n".join(fallback_notes),
-            "context_indicators": {
-                "sources": source_ids,
-                "insights": [],
-                "notes": note_ids,
-            },
-            }
+                fallback_results.append(
+                    _fallback_note_row(note.get_context(context_size="long"))
+                )
+        if fallback_results:
+            results = fallback_results
 
     if results and _is_visual_query(query):
         visual_rows = [row for row in results if row.get("has_visual_summary")]
