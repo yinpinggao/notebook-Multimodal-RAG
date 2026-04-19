@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 
-import { buildAssistantUrl } from '@/lib/assistant-workspace'
+import { buildProjectPath } from '@/lib/project-paths'
 
 export default async function NotebookPageRedirect({
   params,
@@ -8,5 +8,5 @@ export default async function NotebookPageRedirect({
   params: Promise<{ id: string }>
 }) {
   const { id } = await params
-  redirect(buildAssistantUrl({ projectId: decodeURIComponent(id), view: 'knowledge' }))
+  redirect(buildProjectPath({ projectId: id }))
 }

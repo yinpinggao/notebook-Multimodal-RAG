@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { AlertCircle, Workflow } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 
+import { DetailSplitLayout, PageHeader } from '@/components/projects/page-templates'
 import { RunDetail } from '@/components/runs/run-detail'
 import { RunList } from '@/components/runs/run-list'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useProjectRun, useProjectRuns } from '@/lib/hooks/use-project-runs'
 import { projectIdToNotebookId } from '@/lib/project-alias'
 import { formatApiError } from '@/lib/utils/error-handler'
@@ -55,17 +55,11 @@ export default function ProjectRunsPage() {
 
   return (
     <div className="space-y-6">
-      <Card className="border-border/70">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Workflow className="h-4 w-4 text-muted-foreground" />
-            <CardTitle>运行轨迹</CardTitle>
-          </div>
-          <CardDescription>
-            把 ask、compare、artifact 和记忆重建留下来的执行轨迹摊开看，先看步骤，再看证据、工具和写入结果。
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      <PageHeader
+        eyebrow={<Badge variant="outline">Runs / Trace</Badge>}
+        title="运行轨迹"
+        description="把 ask、compare、artifact 和记忆重建留下来的执行轨迹摊开看。"
+      />
 
       {topLevelError ? (
         <Alert variant="destructive">
@@ -81,19 +75,27 @@ export default function ProjectRunsPage() {
         <Badge variant="outline">{counts.failed} 条失败</Badge>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <RunList
-          runs={runs}
-          activeRunId={activeRunId}
-          isLoading={runsLoading}
-          onSelect={setActiveRunId}
-        />
-
-        <RunDetail
-          run={activeRun ?? runs.find((run) => run.id === activeRunId) ?? null}
-          isLoading={activeRunLoading}
-        />
-      </div>
+      <DetailSplitLayout
+        rail={
+          <RunList
+            runs={runs}
+            activeRunId={activeRunId}
+            isLoading={runsLoading}
+            onSelect={setActiveRunId}
+          />
+        }
+        detail={
+          <RunDetail
+            run={activeRun ?? runs.find((run) => run.id === activeRunId) ?? null}
+            isLoading={activeRunLoading}
+          />
+        }
+        railTitle="运行列表"
+        railDescription="先选一条运行，再看步骤、工具和写入结果。"
+        railBadge={<Badge variant="outline">{runs.length}</Badge>}
+        railWidth="minmax(320px, 0.9fr)"
+        detailWidth="minmax(0, 1.55fr)"
+      />
     </div>
   )
 }

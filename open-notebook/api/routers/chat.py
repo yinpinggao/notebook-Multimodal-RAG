@@ -552,6 +552,7 @@ async def stream_chat_response(
         await chat_graph.aupdate_state(
             config=RunnableConfig(configurable={"thread_id": full_session_id}),
             values={"messages": state_values["messages"]},
+            as_node="agent",
         )
 
         # Send completion signal

@@ -20,13 +20,10 @@ describe('AppSidebar', () => {
     // Check for logo or app name (using actual locale value)
     expect(screen.getByText(/ZhiyanCang/i)).toBeDefined()
     
-    // Check for navigation items (using actual locale values)
-    expect(screen.getByText(/Dashboard/i)).toBeDefined()
-    expect(screen.getByText(/Knowledge Hub/i)).toBeDefined()
-    expect(screen.getByText(/Workspace/i)).toBeDefined()
-    expect(screen.getByText(/Memory Manager/i)).toBeDefined()
-    expect(screen.getByText(/Models/i)).toBeDefined()
-    expect(screen.getByText(/Settings/i)).toBeDefined()
+    // New primary navigation keeps only the project entry visible by default
+    expect(screen.getByText(/Projects/i)).toBeDefined()
+    expect(screen.getByText('新建')).toBeDefined()
+    expect(screen.getByText('更多入口')).toBeDefined()
   })
 
   it('toggles collapse state when clicking handle', () => {

@@ -1,20 +1,20 @@
 'use client'
 
 import { useCallback, useEffect, useId, useMemo, useState } from 'react'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   Bot,
-  BrainCircuit,
+  Boxes,
   Command as CommandIcon,
+  FileSearch,
+  FileText,
+  FlaskConical,
   FolderKanban,
-  LayoutDashboard,
-  LayoutPanelLeft,
+  Monitor,
+  Moon,
   Plus,
   Settings,
-  Sparkles,
   Sun,
-  Moon,
-  Monitor,
 } from 'lucide-react'
 
 import {
@@ -24,43 +24,39 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
-import {
-  buildAssistantUrl,
-  HarnessAgentId,
-  mergeAssistantSearchParams,
-} from '@/lib/assistant-workspace'
 import { useCreateDialogs } from '@/lib/hooks/use-create-dialogs'
 import { useProjectMemory } from '@/lib/hooks/use-project-memory'
 import { useProjects } from '@/lib/hooks/use-projects'
+import { projectIdToNotebookId } from '@/lib/project-alias'
 import { useTranslation } from '@/lib/hooks/use-translation'
+import { buildProjectPath } from '@/lib/project-paths'
 import { useTheme } from '@/lib/stores/theme-store'
 
 const COMMAND_TOGGLE_EVENT = 'command-palette:toggle'
+
+function resolveProjectIdFromPath(pathname: string | null) {
+  if (!pathname?.startsWith('/projects/')) {
+    return ''
+  }
+
+  const [, , projectId] = pathname.split('/')
+  return projectId ? projectIdToNotebookId(projectId) : ''
+}
 
 export function CommandPalette() {
   const commandInputId = useId()
   const router = useRouter()
   const pathname = usePathname()
-  const searchParams = useSearchParams()
   const { t } = useTranslation()
   const { openSourceDialog, openNotebookDialog } = useCreateDialogs()
   const { setTheme } = useTheme()
   const { data: projects = [] } = useProjects(false)
-  const currentProjectId = searchParams.get('project') || ''
+
+  const currentProjectId = useMemo(() => resolveProjectIdFromPath(pathname), [pathname])
   const { data: memories = [] } = useProjectMemory(currentProjectId)
 
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-
-  const agentItems = useMemo(
-    () => [
-      { id: 'research' as HarnessAgentId, label: t.assistant.researchAgent },
-      { id: 'retrieval' as HarnessAgentId, label: t.assistant.retrievalAgent },
-      { id: 'visual' as HarnessAgentId, label: t.assistant.visualAgent },
-      { id: 'synthesis' as HarnessAgentId, label: t.assistant.synthesisAgent },
-    ],
-    [t]
-  )
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -116,33 +112,21 @@ export function CommandPalette() {
       open={open}
       onOpenChange={setOpen}
       title={t.common.quickActions}
-      description={t.assistant.commandPaletteHint}
+      description="搜索项目、资料、后台入口和主题设置。"
       className="sm:max-w-2xl"
     >
       <CommandInput
         id={commandInputId}
         value={query}
         onValueChange={setQuery}
-        placeholder={t.assistant.commandPalettePlaceholder}
+        placeholder="搜索项目、页面和动作..."
         aria-label={t.common.quickActions}
       />
       <CommandList>
-        <CommandGroup heading={t.navigation.nav}>
-          <CommandItem onSelect={() => handleNavigate('/dashboard')}>
-            <LayoutDashboard className="h-4 w-4" />
-            <span>{t.navigation.dashboard}</span>
-          </CommandItem>
-          <CommandItem onSelect={() => handleNavigate(buildAssistantUrl({ view: 'knowledge' }))}>
+        <CommandGroup heading="导航">
+          <CommandItem onSelect={() => handleNavigate('/projects')}>
             <FolderKanban className="h-4 w-4" />
-            <span>{t.assistant.knowledgeHub}</span>
-          </CommandItem>
-          <CommandItem onSelect={() => handleNavigate(buildAssistantUrl({ view: 'workspace' }))}>
-            <LayoutPanelLeft className="h-4 w-4" />
-            <span>{t.assistant.workspace}</span>
-          </CommandItem>
-          <CommandItem onSelect={() => handleNavigate(buildAssistantUrl({ view: 'memory' }))}>
-            <BrainCircuit className="h-4 w-4" />
-            <span>{t.assistant.memoryManager}</span>
+            <span>{t.navigation.projects}</span>
           </CommandItem>
           <CommandItem onSelect={() => handleNavigate('/models')}>
             <Bot className="h-4 w-4" />
@@ -152,6 +136,26 @@ export function CommandPalette() {
             <Settings className="h-4 w-4" />
             <span>{t.navigation.settings}</span>
           </CommandItem>
+          <CommandItem onSelect={() => handleNavigate('/admin/evals')}>
+            <FlaskConical className="h-4 w-4" />
+            <span>评测中心</span>
+          </CommandItem>
+          <CommandItem onSelect={() => handleNavigate('/admin/jobs')}>
+            <Boxes className="h-4 w-4" />
+            <span>任务队列</span>
+          </CommandItem>
+          <CommandItem onSelect={() => handleNavigate('/assistant')}>
+            <CommandIcon className="h-4 w-4" />
+            <span>旧工作台</span>
+          </CommandItem>
+          <CommandItem onSelect={() => handleNavigate('/sources')}>
+            <FileText className="h-4 w-4" />
+            <span>资料列表</span>
+          </CommandItem>
+          <CommandItem onSelect={() => handleNavigate('/vrag')}>
+            <FileSearch className="h-4 w-4" />
+            <span>视觉证据</span>
+          </CommandItem>
         </CommandGroup>
 
         <CommandGroup heading={t.assistant.projectsHeading}>
@@ -160,7 +164,7 @@ export function CommandPalette() {
               key={project.id}
               value={`project ${project.name} ${project.description || ''}`}
               onSelect={() =>
-                handleNavigate(buildAssistantUrl({ projectId: project.id, view: 'knowledge' }))
+                handleNavigate(buildProjectPath({ projectId: project.id, section: 'overview' }))
               }
             >
               <FolderKanban className="h-4 w-4" />
@@ -169,40 +173,17 @@ export function CommandPalette() {
           ))}
         </CommandGroup>
 
-        <CommandGroup heading={t.assistant.agents}>
-          {agentItems.map((item) => (
-            <CommandItem
-              key={item.id}
-              value={`agent ${item.label}`}
-              onSelect={() =>
-                handleNavigate(
-                  pathname === '/assistant'
-                    ? mergeAssistantSearchParams(searchParams, { agent: item.id })
-                    : buildAssistantUrl({ agent: item.id })
-                )
-              }
-            >
-              <Bot className="h-4 w-4" />
-              <span>{item.label}</span>
-            </CommandItem>
-          ))}
-        </CommandGroup>
-
         {currentProjectId ? (
-          <CommandGroup heading={t.assistant.currentMemoryHeading}>
+          <CommandGroup heading="当前项目记忆">
             {memories.slice(0, 8).map((memory) => (
               <CommandItem
                 key={memory.id}
                 value={`memory ${memory.text} ${memory.type} ${memory.status}`}
                 onSelect={() =>
-                  handleNavigate(
-                    mergeAssistantSearchParams(searchParams, {
-                      view: 'memory',
-                    })
-                  )
+                  handleNavigate(buildProjectPath({ projectId: currentProjectId, section: 'memory' }))
                 }
               >
-                <BrainCircuit className="h-4 w-4" />
+                <Boxes className="h-4 w-4" />
                 <span>{memory.text}</span>
               </CommandItem>
             ))}
@@ -210,13 +191,13 @@ export function CommandPalette() {
         ) : null}
 
         <CommandGroup heading={t.navigation.create}>
-          <CommandItem onSelect={() => handleSelect(() => openSourceDialog())}>
-            <Plus className="h-4 w-4" />
-            <span>{t.common.newSource}</span>
-          </CommandItem>
           <CommandItem onSelect={() => handleSelect(() => openNotebookDialog())}>
             <Plus className="h-4 w-4" />
-            <span>{t.assistant.createProject}</span>
+            <span>新建项目</span>
+          </CommandItem>
+          <CommandItem onSelect={() => handleSelect(() => openSourceDialog())}>
+            <Plus className="h-4 w-4" />
+            <span>导入资料</span>
           </CommandItem>
         </CommandGroup>
 
@@ -232,21 +213,6 @@ export function CommandPalette() {
           <CommandItem onSelect={() => handleSelect(() => setTheme('system'))}>
             <Monitor className="h-4 w-4" />
             <span>{t.common.system}</span>
-          </CommandItem>
-        </CommandGroup>
-
-        <CommandGroup heading={t.assistant.shortcutsHeading}>
-          <CommandItem
-            onSelect={() => handleNavigate(buildAssistantUrl({ view: 'workspace' }))}
-          >
-            <CommandIcon className="h-4 w-4" />
-            <span>{t.common.quickActions}</span>
-          </CommandItem>
-          <CommandItem
-            onSelect={() => handleNavigate(buildAssistantUrl({ view: 'workspace' }))}
-          >
-            <Sparkles className="h-4 w-4" />
-            <span>{t.assistant.singleWorkspaceHint}</span>
           </CommandItem>
         </CommandGroup>
       </CommandList>

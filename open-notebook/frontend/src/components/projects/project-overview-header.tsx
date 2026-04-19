@@ -1,10 +1,8 @@
 'use client'
 
-import Link from 'next/link'
-import { ArrowRight, BrainCircuit, Database, FileText, ImageIcon, Sparkles } from 'lucide-react'
+import { BrainCircuit, Database, FileText, ImageIcon, Sparkles } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   ProjectOverviewStats,
@@ -21,7 +19,6 @@ export function ProjectOverviewHeader({
   project,
   stats,
 }: ProjectOverviewHeaderProps) {
-  const projectHref = `/projects/${encodeURIComponent(project.id)}`
   const noteCountLabel = stats.noteCount ?? '--'
 
   return (
@@ -34,36 +31,17 @@ export function ProjectOverviewHeader({
           </Badge>
         </div>
 
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div className="space-y-3">
-            <div className="space-y-2">
-              <CardTitle className="break-words text-3xl">{project.name}</CardTitle>
-              <CardDescription className="max-w-3xl text-sm leading-6">
-                {project.description || '先把资料组织成项目上下文，再进入证据问答、对比和输出。'}
-              </CardDescription>
-            </div>
-
-            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-              <span>创建于 {formatProjectTimestamp(project.createdAt)}</span>
-              <span>最近整理 {formatProjectTimestamp(project.updatedAt)}</span>
-            </div>
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <CardTitle className="break-words text-3xl">{project.name}</CardTitle>
+            <CardDescription className="max-w-3xl text-sm leading-6">
+              {project.description || '先把资料组织成项目上下文，再进入证据问答、对比和输出。'}
+            </CardDescription>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button asChild>
-              <Link href={`${projectHref}/evidence`}>
-                开始提问
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
-            </Button>
-
-            <Button asChild variant="outline">
-              <Link href={`${projectHref}/outputs`}>生成综述</Link>
-            </Button>
-
-            <Button asChild variant="outline">
-              <Link href={`${projectHref}/outputs`}>答辩提纲</Link>
-            </Button>
+          <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+            <span>创建于 {formatProjectTimestamp(project.createdAt)}</span>
+            <span>最近整理 {formatProjectTimestamp(project.updatedAt)}</span>
           </div>
         </div>
       </CardHeader>

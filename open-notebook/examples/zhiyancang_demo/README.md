@@ -23,6 +23,12 @@
 - `solution_plan.md`
   - 参赛方案说明
   - 适合和任务书做对比、生成答辩材料
+- `innovation_brief.md`
+  - 创新点答辩备忘
+  - 适合回答“创新点是什么”
+- `demo_runbook.md`
+  - 演示与兜底手册
+  - 适合回答“一分钟保住哪些页面”
 - `evidence_brief.md`
   - 证据问答速查表
   - 适合演示高频问题的证据定位
@@ -34,8 +40,10 @@
 
 1. `competition_brief.md`
 2. `solution_plan.md`
-3. `evidence_brief.md`
-4. `judge_focus.md`
+3. `innovation_brief.md`
+4. `demo_runbook.md`
+5. `evidence_brief.md`
+6. `judge_focus.md`
 
 ## 推荐演示动作
 

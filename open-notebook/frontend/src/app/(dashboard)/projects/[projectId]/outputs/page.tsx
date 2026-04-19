@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { AlertCircle, FileText } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 
 import { ArtifactEditor } from '@/components/artifacts/artifact-editor'
 import { ArtifactList } from '@/components/artifacts/artifact-list'
 import { ArtifactTemplatePicker } from '@/components/artifacts/artifact-template-picker'
+import { DetailSplitLayout, PageHeader } from '@/components/projects/page-templates'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import {
   useCreateProjectArtifact,
   useProjectArtifact,
@@ -97,17 +98,11 @@ export default function ProjectOutputsPage() {
 
   return (
     <div className="space-y-6">
-      <Card className="border-border/70">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-muted-foreground" />
-            <CardTitle>输出工坊</CardTitle>
-          </div>
-          <CardDescription>
-            把问答、项目总览和资料对比沉淀成可交付的 markdown 产物，先把主线跑通，再继续细化导出。
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      <PageHeader
+        eyebrow={<Badge variant="outline">Output Studio</Badge>}
+        title="输出工坊"
+        description="把问答、项目总览和资料对比沉淀成可交付的 markdown 产物。"
+      />
 
       {topLevelError ? (
         <Alert variant="destructive">
@@ -133,39 +128,47 @@ export default function ProjectOutputsPage() {
         </Alert>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <div className="space-y-4">
-          <ArtifactTemplatePicker
-            projectName={overview?.project.name}
-            threadOptions={threadOptions}
-            compareOptions={compareOptions}
-            isSubmitting={createArtifact.isPending}
-            onCreate={(request) => {
-              void handleCreateArtifact(request)
-            }}
-          />
+      <DetailSplitLayout
+        rail={
+          <>
+            <ArtifactTemplatePicker
+              projectName={overview?.project.name}
+              threadOptions={threadOptions}
+              compareOptions={compareOptions}
+              isSubmitting={createArtifact.isPending}
+              onCreate={(request) => {
+                void handleCreateArtifact(request)
+              }}
+            />
 
-          <ArtifactList
-            artifacts={artifacts}
-            activeArtifactId={activeArtifactId}
-            isLoading={artifactsLoading}
+            <ArtifactList
+              artifacts={artifacts}
+              activeArtifactId={activeArtifactId}
+              isLoading={artifactsLoading}
+              isRegenerating={regenerateArtifact.isPending}
+              onSelect={setActiveArtifactId}
+              onRegenerate={(artifactId) => {
+                void handleRegenerateArtifact(artifactId)
+              }}
+            />
+          </>
+        }
+        detail={
+          <ArtifactEditor
+            artifact={selectedArtifact}
+            isLoading={activeArtifactLoading}
             isRegenerating={regenerateArtifact.isPending}
-            onSelect={setActiveArtifactId}
             onRegenerate={(artifactId) => {
               void handleRegenerateArtifact(artifactId)
             }}
           />
-        </div>
-
-        <ArtifactEditor
-          artifact={selectedArtifact}
-          isLoading={activeArtifactLoading}
-          isRegenerating={regenerateArtifact.isPending}
-          onRegenerate={(artifactId) => {
-            void handleRegenerateArtifact(artifactId)
-          }}
-        />
-      </div>
+        }
+        railTitle="创建与选择"
+        railDescription="先选模板，再切换已有产物。"
+        railBadge={<Badge variant="outline">{artifacts.length}</Badge>}
+        railWidth="minmax(320px, 0.9fr)"
+        detailWidth="minmax(0, 1.6fr)"
+      />
     </div>
   )
 }

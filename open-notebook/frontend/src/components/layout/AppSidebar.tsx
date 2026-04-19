@@ -3,30 +3,25 @@
 import { useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { usePathname, useSearchParams } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import {
-  BrainCircuit,
+  Bot,
+  Boxes,
   ChevronLeft,
   Command,
-  LayoutDashboard,
+  FileSearch,
   FileText,
+  FlaskConical,
   FolderKanban,
-  LayoutPanelLeft,
+  LibraryBig,
   LogOut,
   Menu,
-  Bot,
   Plus,
   Settings,
 } from 'lucide-react'
 
 import { LanguageToggle } from '@/components/common/LanguageToggle'
 import { ThemeToggle } from '@/components/common/ThemeToggle'
-import { useAuth } from '@/lib/hooks/use-auth'
-import { useCreateDialogs } from '@/lib/hooks/use-create-dialogs'
-import { useTranslation } from '@/lib/hooks/use-translation'
-import { buildAssistantUrl } from '@/lib/assistant-workspace'
-import { useSidebarStore } from '@/lib/stores/sidebar-store'
-import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -41,26 +36,34 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useAuth } from '@/lib/hooks/use-auth'
+import { useCreateDialogs } from '@/lib/hooks/use-create-dialogs'
+import { useTranslation } from '@/lib/hooks/use-translation'
+import { isProjectRoute } from '@/lib/project-paths'
+import { useSidebarStore } from '@/lib/stores/sidebar-store'
+import { cn } from '@/lib/utils'
 
 const CREATE_ITEMS = [
   {
     id: 'source',
     icon: FileText,
+    label: '导入资料',
   },
   {
     id: 'project',
     icon: FolderKanban,
+    label: '新建项目',
   },
 ] as const
 
 export function AppSidebar() {
   const pathname = usePathname()
-  const searchParams = useSearchParams()
   const { logout } = useAuth()
   const { t } = useTranslation()
   const { isCollapsed, toggleCollapse } = useSidebarStore()
   const { openSourceDialog, openNotebookDialog } = useCreateDialogs()
   const [createMenuOpen, setCreateMenuOpen] = useState(false)
+  const [secondaryMenuOpen, setSecondaryMenuOpen] = useState(false)
   const [isMac, setIsMac] = useState(true)
 
   useEffect(() => {
@@ -70,47 +73,54 @@ export function AppSidebar() {
   const navigation = useMemo(
     () => [
       {
-        name: t.navigation.dashboard,
-        href: '/dashboard',
-        icon: LayoutDashboard,
-        isActive: pathname === '/dashboard',
-      },
-      {
-        name: t.assistant.knowledgeHub,
-        href: buildAssistantUrl({ view: 'knowledge' }),
+        name: t.navigation.projects,
+        href: '/projects',
         icon: FolderKanban,
-        isActive: pathname === '/assistant' && searchParams.get('view') === 'knowledge',
+        isActive: isProjectRoute(pathname),
       },
-      {
-        name: t.assistant.workspace,
-        href: buildAssistantUrl({ view: 'workspace' }),
-        icon: LayoutPanelLeft,
-        isActive:
-          pathname === '/assistant' &&
-          (!searchParams.get('view') || searchParams.get('view') === 'workspace'),
-      },
-      {
-        name: t.assistant.memoryManager,
-        href: buildAssistantUrl({ view: 'memory' }),
-        icon: BrainCircuit,
-        isActive: pathname === '/assistant' && searchParams.get('view') === 'memory',
-      },
+    ],
+    [pathname, t.navigation.projects]
+  )
+
+  const secondaryLinks = useMemo(
+    () => [
       {
         name: t.navigation.models,
         href: '/models',
         icon: Bot,
-        isActive:
-          pathname === '/models' || pathname?.startsWith('/models/') || pathname === '/settings/api-keys',
       },
       {
         name: t.navigation.settings,
         href: '/settings',
         icon: Settings,
-        isActive:
-          pathname === '/settings' || pathname?.startsWith('/settings/') || false,
+      },
+      {
+        name: '评测中心',
+        href: '/admin/evals',
+        icon: FlaskConical,
+      },
+      {
+        name: '任务队列',
+        href: '/admin/jobs',
+        icon: Boxes,
+      },
+      {
+        name: '资料列表',
+        href: '/sources',
+        icon: LibraryBig,
+      },
+      {
+        name: '视觉证据',
+        href: '/vrag',
+        icon: FileSearch,
+      },
+      {
+        name: '旧工作台',
+        href: '/assistant',
+        icon: FolderKanban,
       },
     ],
-    [pathname, searchParams, t]
+    [t.navigation.models, t.navigation.settings]
   )
 
   const handleCreateSelection = (target: (typeof CREATE_ITEMS)[number]['id']) => {
@@ -187,22 +197,18 @@ export function AppSidebar() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="default"
-                      size="sm"
-                      className="w-full justify-center px-2"
-                    >
+                    <Button variant="default" size="sm" className="w-full justify-center px-2">
                       <Plus className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
                 </TooltipTrigger>
-                <TooltipContent side="right">{t.common.create}</TooltipContent>
+                <TooltipContent side="right">新建</TooltipContent>
               </Tooltip>
             ) : (
               <DropdownMenuTrigger asChild>
                 <Button variant="default" size="sm" className="w-full justify-start">
                   <Plus className="mr-2 h-4 w-4" />
-                  {t.common.create}
+                  新建
                 </Button>
               </DropdownMenuTrigger>
             )}
@@ -222,7 +228,7 @@ export function AppSidebar() {
                   className="gap-2"
                 >
                   <item.icon className="h-4 w-4" />
-                  {item.id === 'source' ? t.common.source : t.assistant.createProject}
+                  {item.label}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -265,6 +271,50 @@ export function AppSidebar() {
         </nav>
 
         <div className={cn('space-y-2 border-t border-sidebar-border p-3', isCollapsed && 'px-2')}>
+          {isCollapsed ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenu open={secondaryMenuOpen} onOpenChange={setSecondaryMenuOpen}>
+                  <DropdownMenuTrigger asChild>
+                    <Button type="button" variant="ghost" className="w-full justify-center">
+                      <Boxes className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" side="right" className="w-52">
+                    {secondaryLinks.map((item) => (
+                      <DropdownMenuItem key={item.href} asChild className="gap-2">
+                        <Link href={item.href}>
+                          <item.icon className="h-4 w-4" />
+                          {item.name}
+                        </Link>
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </TooltipTrigger>
+              <TooltipContent side="right">更多入口</TooltipContent>
+            </Tooltip>
+          ) : (
+            <DropdownMenu open={secondaryMenuOpen} onOpenChange={setSecondaryMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="outline" className="w-full justify-start gap-3">
+                  <Boxes className="h-4 w-4" />
+                  更多入口
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="top" className="w-56">
+                {secondaryLinks.map((item) => (
+                  <DropdownMenuItem key={item.href} asChild className="gap-2">
+                    <Link href={item.href}>
+                      <item.icon className="h-4 w-4" />
+                      {item.name}
+                    </Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+
           {!isCollapsed ? (
             <button
               type="button"
@@ -274,14 +324,14 @@ export function AppSidebar() {
               <div className="flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   <Command className="h-3 w-3" />
-                  {t.common.quickActions}
+                  快捷操作
                 </span>
                 <kbd className="inline-flex h-5 items-center rounded border bg-muted px-1.5 font-mono text-[10px] text-muted-foreground">
                   {isMac ? '⌘K' : 'Ctrl+K'}
                 </kbd>
               </div>
               <p className="mt-1 text-[10px] text-sidebar-foreground/50">
-                {t.common.quickActionsDesc}
+                导航、搜索、提问、主题
               </p>
             </button>
           ) : (
@@ -296,7 +346,7 @@ export function AppSidebar() {
                   <Command className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="right">{t.common.quickActions}</TooltipContent>
+              <TooltipContent side="right">快捷操作</TooltipContent>
             </Tooltip>
           )}
 

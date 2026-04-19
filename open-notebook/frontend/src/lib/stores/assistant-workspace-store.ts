@@ -15,6 +15,7 @@ interface AssistantWorkspaceStoreState {
   currentProjectId?: string
   currentAgent: HarnessAgentId
   currentThreadId?: string
+  lastEvidenceThreadId?: string
   currentView: AssistantView
   knowledgeCollapsed: boolean
   memoryCollapsed: boolean
@@ -24,6 +25,7 @@ interface AssistantWorkspaceStoreState {
   setCurrentProject: (projectId?: string) => void
   setCurrentAgent: (agent: HarnessAgentId) => void
   setCurrentThread: (threadId?: string) => void
+  setLastEvidenceThreadId: (threadId?: string) => void
   setCurrentView: (view: AssistantView) => void
   setMobileTab: (tab: AssistantMobileTab) => void
   setKnowledgeCollapsed: (collapsed: boolean) => void
@@ -44,6 +46,7 @@ export const useAssistantWorkspaceStore = create<AssistantWorkspaceStoreState>()
       currentProjectId: undefined,
       currentAgent: DEFAULT_ASSISTANT_AGENT,
       currentThreadId: undefined,
+      lastEvidenceThreadId: undefined,
       currentView: DEFAULT_ASSISTANT_VIEW,
       knowledgeCollapsed: false,
       memoryCollapsed: false,
@@ -64,6 +67,7 @@ export const useAssistantWorkspaceStore = create<AssistantWorkspaceStoreState>()
         })),
       setCurrentAgent: (agent) => set({ currentAgent: agent }),
       setCurrentThread: (threadId) => set({ currentThreadId: threadId }),
+      setLastEvidenceThreadId: (threadId) => set({ lastEvidenceThreadId: threadId }),
       setCurrentView: (view) => set({ currentView: view }),
       setMobileTab: (tab) => set({ mobileTab: tab }),
       setKnowledgeCollapsed: (collapsed) => set({ knowledgeCollapsed: collapsed }),
@@ -125,6 +129,7 @@ export const useAssistantWorkspaceStore = create<AssistantWorkspaceStoreState>()
       partialize: (state) => ({
         currentAgent: state.currentAgent,
         currentView: state.currentView,
+        lastEvidenceThreadId: state.lastEvidenceThreadId,
         knowledgeCollapsed: state.knowledgeCollapsed,
         memoryCollapsed: state.memoryCollapsed,
         mobileTab: state.mobileTab,

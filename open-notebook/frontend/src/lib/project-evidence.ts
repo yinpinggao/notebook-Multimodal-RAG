@@ -1,3 +1,4 @@
+import { buildProjectPath } from '@/lib/project-paths'
 import { ProjectAskMode } from '@/lib/types/api'
 
 export interface EvidenceTarget {
@@ -49,12 +50,11 @@ export function evidenceThreadIdFromRoute(threadId: string): string {
 }
 
 export function buildProjectEvidencePath(projectId: string, threadId?: string): string {
-  const basePath = `/projects/${encodeURIComponent(projectId)}/evidence`
-  if (!threadId) {
-    return basePath
-  }
-
-  return `${basePath}/${encodeURIComponent(threadId)}`
+  return buildProjectPath({
+    projectId,
+    section: 'evidence',
+    threadId,
+  })
 }
 
 export function resolveEvidenceTarget(params: {

@@ -203,7 +203,7 @@ describe('AgentPanel', () => {
       isLoading: false,
       isFetching: false,
       error: null,
-    } as any)
+    })
     useAssistantWorkspaceStoreMock.mockReturnValue({
       currentAgent: 'visual',
       currentThreadId: 'chat_session:demo',

@@ -8,16 +8,37 @@ import { frFR } from './fr-FR';
 import { ruRU } from './ru-RU';
 import { bnIN } from './bn-IN';
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const mergeLocale = <T extends Record<string, unknown>>(
+  base: T,
+  overrides: Record<string, unknown>,
+): T => {
+  const merged: Record<string, unknown> = { ...base };
+
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) continue;
+
+    const current = merged[key];
+    merged[key] = isRecord(current) && isRecord(value)
+      ? mergeLocale(current, value)
+      : value;
+  }
+
+  return merged as T;
+};
+
 export const resources = {
   'zh-CN': { translation: zhCN },
   'en-US': { translation: enUS },
-  'zh-TW': { translation: zhTW },
-  'pt-BR': { translation: ptBR },
-  'ja-JP': { translation: jaJP },
-  'it-IT': { translation: itIT },
-  'fr-FR': { translation: frFR },
-  'ru-RU': { translation: ruRU },
-  'bn-IN': { translation: bnIN },
+  'zh-TW': { translation: mergeLocale(enUS, zhTW) },
+  'pt-BR': { translation: mergeLocale(enUS, ptBR) },
+  'ja-JP': { translation: mergeLocale(enUS, jaJP) },
+  'it-IT': { translation: mergeLocale(enUS, itIT) },
+  'fr-FR': { translation: mergeLocale(enUS, frFR) },
+  'ru-RU': { translation: mergeLocale(enUS, ruRU) },
+  'bn-IN': { translation: mergeLocale(enUS, bnIN) },
 } as const;
 
 export type TranslationKeys = typeof enUS;

@@ -1,20 +1,18 @@
-import { redirect } from 'next/navigation'
-
-import { buildAssistantUrl } from '@/lib/assistant-workspace'
+import { ProjectEvidenceWorkspace } from '@/components/evidence/project-evidence-workspace'
 import { evidenceThreadIdFromRoute } from '@/lib/project-evidence'
 import { projectIdToNotebookId } from '@/lib/project-alias'
 
-export default async function ProjectEvidenceThreadPageRedirect({
+export default async function ProjectEvidenceThreadPage({
   params,
 }: {
   params: Promise<{ projectId: string; threadId: string }>
 }) {
   const { projectId, threadId } = await params
-  redirect(
-    buildAssistantUrl({
-      projectId: projectIdToNotebookId(projectId),
-      view: 'workspace',
-      threadId: evidenceThreadIdFromRoute(threadId),
-    })
+
+  return (
+    <ProjectEvidenceWorkspace
+      projectId={projectIdToNotebookId(projectId)}
+      initialThreadId={evidenceThreadIdFromRoute(threadId)}
+    />
   )
 }

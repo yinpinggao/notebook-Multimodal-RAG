@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from api.project_evidence_service import (
-    _load_thread_state,
     _latest_response_for_thread,
+    _load_thread_state,
     ask_project,
     select_project_ask_mode,
 )
@@ -195,7 +195,6 @@ async def test_ask_project_uses_selected_scope_and_memory_context(
 async def test_ask_project_rejects_blank_question():
     with pytest.raises(InvalidInputError):
         await ask_project("project:demo", "   ")
-
 
 @pytest.mark.asyncio
 @patch("api.project_evidence_service.build_multimodal_evidence", new_callable=AsyncMock)
