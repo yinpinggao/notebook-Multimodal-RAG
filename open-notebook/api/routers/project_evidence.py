@@ -27,6 +27,22 @@ class ProjectAskRequest(BaseModel):
         default=None,
         description="Existing thread identifier for continuation",
     )
+    source_ids: Optional[list[str]] = Field(
+        default=None,
+        description="Optional source scope restriction",
+    )
+    note_ids: Optional[list[str]] = Field(
+        default=None,
+        description="Optional note scope restriction",
+    )
+    memory_ids: Optional[list[str]] = Field(
+        default=None,
+        description="Optional memory scope restriction",
+    )
+    agent: Optional[str] = Field(
+        default=None,
+        description="Optional selected agent identifier",
+    )
 
 
 class ProjectFollowupRequest(BaseModel):
@@ -34,6 +50,22 @@ class ProjectFollowupRequest(BaseModel):
     mode: Literal["auto", "text", "visual", "mixed"] = Field(
         default="auto",
         description="Requested answer mode",
+    )
+    source_ids: Optional[list[str]] = Field(
+        default=None,
+        description="Optional source scope restriction",
+    )
+    note_ids: Optional[list[str]] = Field(
+        default=None,
+        description="Optional note scope restriction",
+    )
+    memory_ids: Optional[list[str]] = Field(
+        default=None,
+        description="Optional memory scope restriction",
+    )
+    agent: Optional[str] = Field(
+        default=None,
+        description="Optional selected agent identifier",
     )
 
 
@@ -45,6 +77,10 @@ async def ask_project(project_id: str, request: ProjectAskRequest):
             request.question,
             mode=request.mode,
             thread_id=request.thread_id,
+            source_ids=request.source_ids,
+            note_ids=request.note_ids,
+            memory_ids=request.memory_ids,
+            agent=request.agent,
         )
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
@@ -104,6 +140,10 @@ async def followup_project_thread(
             thread_id,
             request.question,
             mode=request.mode,
+            source_ids=request.source_ids,
+            note_ids=request.note_ids,
+            memory_ids=request.memory_ids,
+            agent=request.agent,
         )
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e

@@ -46,7 +46,14 @@ def test_project_ask_endpoint_returns_ask_response(mock_ask_project, client):
 
     response = client.post(
         "/api/projects/project:demo/ask",
-        json={"question": "这个项目的主要特点是什么？", "mode": "auto"},
+        json={
+            "question": "这个项目的主要特点是什么？",
+            "mode": "auto",
+            "source_ids": ["source:alpha"],
+            "note_ids": [],
+            "memory_ids": ["memory:demo"],
+            "agent": "research",
+        },
     )
 
     assert response.status_code == 200
@@ -54,6 +61,16 @@ def test_project_ask_endpoint_returns_ask_response(mock_ask_project, client):
     assert data["thread_id"] == "chat_session:demo"
     assert data["mode"] == "text"
     assert data["evidence_cards"][0]["source_id"] == "source:alpha"
+    mock_ask_project.assert_awaited_once_with(
+        "project:demo",
+        "这个项目的主要特点是什么？",
+        mode="auto",
+        thread_id=None,
+        source_ids=["source:alpha"],
+        note_ids=[],
+        memory_ids=["memory:demo"],
+        agent="research",
+    )
 
 
 @patch(
@@ -146,11 +163,28 @@ def test_followup_project_thread_returns_response(mock_followup, client):
 
     response = client.post(
         "/api/projects/project:demo/threads/chat_session:demo/followup",
-        json={"question": "这张图表说明了什么？", "mode": "auto"},
+        json={
+            "question": "这张图表说明了什么？",
+            "mode": "auto",
+            "source_ids": ["source:vision"],
+            "note_ids": [],
+            "memory_ids": [],
+            "agent": "visual",
+        },
     )
 
     assert response.status_code == 200
     assert response.json()["mode"] == "visual"
+    mock_followup.assert_awaited_once_with(
+        "project:demo",
+        "chat_session:demo",
+        "这张图表说明了什么？",
+        mode="auto",
+        source_ids=["source:vision"],
+        note_ids=[],
+        memory_ids=[],
+        agent="visual",
+    )
 
 
 @patch(

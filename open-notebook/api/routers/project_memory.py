@@ -7,7 +7,7 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from api import project_memory_service
-from api.schemas import MemoryRecord
+from api.schemas import MemoryRecord, SourceReference
 from open_notebook.exceptions import InvalidInputError, NotFoundError
 
 router = APIRouter()
@@ -21,6 +21,25 @@ class ProjectMemoryUpdateRequest(BaseModel):
     text: Optional[str] = Field(
         default=None,
         description="Optional edited memory text",
+    )
+
+
+class ProjectMemoryCreateRequest(BaseModel):
+    text: str = Field(..., min_length=1, description="Memory text")
+    scope: Literal["project"] = Field(
+        default="project",
+        description="Supported memory scope",
+    )
+    type: Literal["fact", "term", "decision", "risk", "preference", "question"] = (
+        Field(..., description="Memory record type")
+    )
+    status: Literal["draft", "accepted", "frozen", "deprecated"] = Field(
+        default="draft",
+        description="Initial governance status",
+    )
+    source_refs: list[SourceReference] = Field(
+        default_factory=list,
+        description="Optional evidence references",
     )
 
 
@@ -52,6 +71,32 @@ async def get_project_memory(project_id: str):
         raise HTTPException(
             status_code=500,
             detail=f"Error listing project memory: {e}",
+        ) from e
+
+
+@router.post(
+    "/projects/{project_id}/memory",
+    response_model=MemoryRecord,
+)
+async def post_project_memory(project_id: str, request: ProjectMemoryCreateRequest):
+    try:
+        return await project_memory_service.create_memory_record(
+            project_id,
+            text=request.text,
+            memory_type=request.type,
+            status=request.status,
+            scope=request.scope,
+            source_refs=request.source_refs,
+        )
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except InvalidInputError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"Error creating memory for {project_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating project memory: {e}",
         ) from e
 
 

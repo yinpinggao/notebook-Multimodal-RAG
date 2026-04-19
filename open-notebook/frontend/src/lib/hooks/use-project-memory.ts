@@ -4,7 +4,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { projectsApi } from '@/lib/api/projects'
 import { QUERY_KEYS } from '@/lib/api/query-client'
-import { ProjectMemoryUpdateRequest } from '@/lib/types/api'
+import {
+  CreateProjectMemoryRequest,
+  ProjectMemoryUpdateRequest,
+} from '@/lib/types/api'
 
 export function useProjectMemory(projectId: string) {
   return useQuery({
@@ -20,6 +23,26 @@ export function useUpdateProjectMemory(projectId: string) {
   return useMutation({
     mutationFn: (params: { memoryId: string; data: ProjectMemoryUpdateRequest }) =>
       projectsApi.updateMemory(projectId, params.memoryId, params.data),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectMemory(projectId),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectOverview(projectId),
+      })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projects,
+      })
+    },
+  })
+}
+
+export function useCreateProjectMemory(projectId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: CreateProjectMemoryRequest) =>
+      projectsApi.createMemory(projectId, data),
     onSuccess: async () => {
       await queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.projectMemory(projectId),

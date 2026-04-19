@@ -53,6 +53,28 @@ def test_get_project_memory_returns_records(mock_list_memory, client):
 
 
 @patch(
+    "api.routers.project_memory.project_memory_service.create_memory_record",
+    new_callable=AsyncMock,
+)
+def test_post_project_memory_returns_record(mock_create_memory, client):
+    mock_create_memory.return_value = _memory_record()
+
+    response = client.post(
+        "/api/projects/project:demo/memory",
+        json={
+            "text": "评审要求需要明确列出技术路线。",
+            "type": "fact",
+            "status": "draft",
+            "scope": "project",
+            "source_refs": [],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "mem:demo"
+
+
+@patch(
     "api.routers.project_memory.project_memory_service.update_memory_record",
     new_callable=AsyncMock,
 )

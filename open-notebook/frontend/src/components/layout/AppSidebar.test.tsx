@@ -18,11 +18,15 @@ describe('AppSidebar', () => {
     render(<AppSidebar />)
     
     // Check for logo or app name (using actual locale value)
-    expect(screen.getByText(/Open Notebook/i)).toBeDefined()
+    expect(screen.getByText(/ZhiyanCang/i)).toBeDefined()
     
     // Check for navigation items (using actual locale values)
-    expect(screen.getByText(/Sources/i)).toBeDefined()
-    expect(screen.getByText(/Projects/i)).toBeDefined()
+    expect(screen.getByText(/Dashboard/i)).toBeDefined()
+    expect(screen.getByText(/Knowledge Hub/i)).toBeDefined()
+    expect(screen.getByText(/Workspace/i)).toBeDefined()
+    expect(screen.getByText(/Memory Manager/i)).toBeDefined()
+    expect(screen.getByText(/Models/i)).toBeDefined()
+    expect(screen.getByText(/Settings/i)).toBeDefined()
   })
 
   it('toggles collapse state when clicking handle', () => {
@@ -55,6 +59,6 @@ describe('AppSidebar', () => {
     render(<AppSidebar />)
     
     // In collapsed mode, app name shouldn't be visible (as text)
-    expect(screen.queryByText(/Open Notebook/i)).toBeNull()
+    expect(screen.queryByText(/ZhiyanCang/i)).toBeNull()
   })
 })

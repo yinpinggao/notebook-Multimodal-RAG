@@ -5,6 +5,7 @@ from typing import Any, Literal, Optional
 
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.schemas import (
     AskResponse,
@@ -25,6 +26,7 @@ from open_notebook.domain.notebook import ChatSession, Notebook
 from open_notebook.evidence import build_evidence_cards
 from open_notebook.exceptions import InvalidInputError, NotFoundError
 from open_notebook.graphs.chat import graph as chat_graph
+from open_notebook.memory_center import list_project_memories
 from open_notebook.seekdb import seekdb_business_store
 from open_notebook.utils.evidence_builder import (
     VISUAL_QUERY_TERMS,
@@ -41,6 +43,71 @@ NO_EVIDENCE_CONTEXT = (
     "当前检索没有找到足够证据。请明确告诉用户现有项目资料不足以支撑确定结论，"
     "并建议缩小问题范围、指定资料或补充文档。不要编造细节或引用。"
 )
+
+
+class _Model(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ProjectEvidenceThreadState(_Model):
+    thread_id: str
+    project_id: str
+    latest_response: Optional[AskResponse] = Field(default=None)
+    source_ids: list[str] = Field(default_factory=list)
+    note_ids: list[str] = Field(default_factory=list)
+    memory_ids: list[str] = Field(default_factory=list)
+    agent: Optional[str] = Field(default=None)
+
+
+def _thread_state_record_id(thread_id: str) -> str:
+    return f"project_evidence_thread:{thread_id}"
+
+
+def _strip_singleton_metadata(data: dict, *, public_id: str | None = None) -> dict:
+    payload = {
+        key: value for key, value in data.items() if key not in {"created", "updated"}
+    }
+    payload.pop("id", None)
+    if public_id is not None:
+        payload["thread_id"] = public_id
+    return payload
+
+
+async def _load_thread_state(thread_id: str) -> ProjectEvidenceThreadState | None:
+    data = await seekdb_business_store.get_singleton(_thread_state_record_id(thread_id))
+    if not data:
+        return None
+    return ProjectEvidenceThreadState.model_validate(
+        _strip_singleton_metadata(data, public_id=thread_id)
+    )
+
+
+async def _save_thread_state(
+    thread_id: str,
+    project_id: str,
+    *,
+    latest_response: AskResponse,
+    source_ids: Optional[list[str]] = None,
+    note_ids: Optional[list[str]] = None,
+    memory_ids: Optional[list[str]] = None,
+    agent: Optional[str] = None,
+) -> ProjectEvidenceThreadState:
+    state = ProjectEvidenceThreadState(
+        thread_id=thread_id,
+        project_id=project_id,
+        latest_response=latest_response,
+        source_ids=source_ids or [],
+        note_ids=note_ids or [],
+        memory_ids=memory_ids or [],
+        agent=agent,
+    )
+    saved = await seekdb_business_store.upsert_singleton(
+        _thread_state_record_id(thread_id),
+        state.model_dump(mode="json"),
+    )
+    return ProjectEvidenceThreadState.model_validate(
+        _strip_singleton_metadata(saved, public_id=thread_id)
+    )
 
 
 def _normalize_session_id(thread_id: str) -> str:
@@ -61,6 +128,61 @@ def _is_visual_query(question: str) -> bool:
 
 def _row_has_visual_signal(row: dict[str, Any]) -> bool:
     return bool(row.get("has_visual_summary") or row.get("page_image_path"))
+
+
+def _normalize_selected_ids(values: Optional[list[str]]) -> Optional[list[str]]:
+    if values is None:
+        return None
+
+    deduped: list[str] = []
+    for value in values:
+        normalized = " ".join(str(value or "").strip().split())
+        if normalized and normalized not in deduped:
+            deduped.append(normalized)
+    return deduped
+
+
+def _filter_scope_ids(
+    requested_ids: Optional[list[str]],
+    available_ids: list[str],
+) -> list[str]:
+    normalized_ids = _normalize_selected_ids(requested_ids)
+    if normalized_ids is None:
+        return list(available_ids)
+
+    available = set(available_ids)
+    return [item for item in normalized_ids if item in available]
+
+
+async def _build_memory_context(
+    project_id: str,
+    memory_ids: Optional[list[str]],
+) -> tuple[list[str], str]:
+    normalized_ids = _normalize_selected_ids(memory_ids)
+    if normalized_ids is None:
+        return [], ""
+
+    memories = await list_project_memories(project_id, include_deprecated=True)
+    by_id = {memory.id: memory for memory in memories}
+    selected = [by_id[memory_id] for memory_id in normalized_ids if memory_id in by_id]
+    if not selected:
+        return [], ""
+
+    blocks = []
+    selected_ids: list[str] = []
+    for index, memory in enumerate(selected, start=1):
+        selected_ids.append(memory.id)
+        refs = "；".join(
+            ref.citation_text or ref.internal_ref
+            for ref in memory.source_refs[:2]
+            if ref.citation_text or ref.internal_ref
+        )
+        suffix = f"；来源：{refs}" if refs else ""
+        blocks.append(
+            f"[Memory {index}] 类型：{memory.type}；状态：{memory.status}；内容：{memory.text}{suffix}"
+        )
+
+    return selected_ids, "## Selected Project Memories\n" + "\n".join(blocks)
 
 
 def select_project_ask_mode(
@@ -250,6 +372,10 @@ async def _latest_response_for_thread(
     messages: list[EvidenceThreadMessage],
     thread_id: str,
 ) -> Optional[AskResponse]:
+    stored_state = await _load_thread_state(thread_id)
+    if stored_state and stored_state.project_id == project_id and stored_state.latest_response:
+        return stored_state.latest_response
+
     last_question = next(
         (message.content for message in reversed(messages) if message.type == "human"),
         None,
@@ -340,11 +466,26 @@ async def ask_project(
     *,
     mode: ProjectAskMode = "auto",
     thread_id: Optional[str] = None,
+    source_ids: Optional[list[str]] = None,
+    note_ids: Optional[list[str]] = None,
+    memory_ids: Optional[list[str]] = None,
+    agent: Optional[str] = None,
 ) -> AskResponse:
     if not question or not question.strip():
         raise InvalidInputError("Question cannot be empty")
 
-    _, notebook, source_ids, note_ids = await _resolve_project_scope(project_id)
+    _, notebook, available_source_ids, available_note_ids = await _resolve_project_scope(
+        project_id
+    )
+    scoped_source_ids = _filter_scope_ids(source_ids, available_source_ids)
+    scoped_note_ids = _filter_scope_ids(note_ids, available_note_ids)
+    selected_memory_ids, memory_context_text = await _build_memory_context(
+        project_id,
+        memory_ids,
+    )
+    explicit_source_scope = source_ids is not None
+    explicit_note_scope = note_ids is not None
+
     session = await _get_or_create_thread(project_id, question, thread_id=thread_id)
     run = await create_project_run(
         project_id,
@@ -352,21 +493,35 @@ async def ask_project(
         input_json={
             "question": question,
             "mode": mode,
+            "agent": agent,
             "thread_id": str(session.id or ""),
+            "source_ids": scoped_source_ids,
+            "note_ids": scoped_note_ids,
+            "memory_ids": selected_memory_ids,
         },
     )
     await mark_run_running(run.id)
 
     try:
-        evidence = await build_multimodal_evidence(
-            question,
-            source_ids=source_ids or None,
-            note_ids=note_ids or None,
-            include_sources=True,
-            include_notes=True,
-            limit=8,
-            minimum_score=0.2,
-        )
+        include_sources = not explicit_source_scope or bool(scoped_source_ids)
+        include_notes = not explicit_note_scope or bool(scoped_note_ids)
+
+        if include_sources or include_notes:
+            evidence = await build_multimodal_evidence(
+                question,
+                source_ids=scoped_source_ids or None,
+                note_ids=scoped_note_ids or None,
+                include_sources=include_sources,
+                include_notes=include_notes,
+                limit=8,
+                minimum_score=0.2,
+            )
+        else:
+            evidence = {
+                "results": [],
+                "context_text": "",
+            }
+
         results = evidence.get("results") or []
         selected_mode = select_project_ask_mode(mode, question, results)
         evidence_cards = build_evidence_cards(
@@ -377,8 +532,12 @@ async def ask_project(
         )
         evidence_refs = [card.internal_ref for card in evidence_cards]
         source_names = [card.source_name for card in evidence_cards]
-        context_text = (evidence.get("context_text") or "").strip()
-        if not results:
+        context_text_parts = [
+            (evidence.get("context_text") or "").strip(),
+            memory_context_text.strip(),
+        ]
+        context_text = "\n\n".join(part for part in context_text_parts if part)
+        if not results and not memory_context_text.strip():
             context_text = NO_EVIDENCE_CONTEXT
 
         await record_tool_call(
@@ -389,9 +548,14 @@ async def ask_project(
             input_json={
                 "question": question,
                 "requested_mode": mode,
+                "agent": agent,
+                "source_ids": scoped_source_ids,
+                "note_ids": scoped_note_ids,
+                "memory_ids": selected_memory_ids,
             },
             output_json={
                 "result_count": len(results),
+                "selected_memory_count": len(selected_memory_ids),
                 "selected_mode": selected_mode,
             },
             evidence_refs=evidence_refs,
@@ -402,6 +566,7 @@ async def ask_project(
             agent_name="evidence_agent",
             output_json={
                 "evidence_card_count": len(evidence_cards),
+                "selected_memory_count": len(selected_memory_ids),
             },
             evidence_refs=evidence_refs,
         )
@@ -434,6 +599,7 @@ async def ask_project(
             agent_name="answer_agent",
             input_json={
                 "thread_id": str(session.id or ""),
+                "agent": agent,
                 "mode": selected_mode,
             },
             output_json={
@@ -443,31 +609,7 @@ async def ask_project(
             evidence_refs=evidence_refs,
             output_refs=[str(session.id or "")],
         )
-        await record_answer_step(
-            run.id,
-            title="返回回答结果",
-            agent_name="answer_agent",
-            output_json={
-                "mode": selected_mode,
-                "suggested_followup_count": len(suggested_followups),
-            },
-            evidence_refs=evidence_refs,
-            output_refs=[str(session.id or "")],
-        )
-        await mark_run_completed(
-            run.id,
-            output_json={
-                "mode": selected_mode,
-                "confidence": confidence,
-                "evidence_card_count": len(evidence_cards),
-                "thread_id": str(session.id or ""),
-            },
-            tool_calls=["build_multimodal_evidence", "chat_graph.invoke"],
-            evidence_reads=evidence_refs,
-            outputs=[str(session.id or "")],
-        )
-
-        return AskResponse(
+        response = AskResponse(
             answer=answer,
             confidence=confidence,
             evidence_cards=evidence_cards,
@@ -477,6 +619,44 @@ async def ask_project(
             mode=selected_mode,
             thread_id=str(session.id or ""),
         )
+        await _save_thread_state(
+            str(session.id or ""),
+            project_id,
+            latest_response=response,
+            source_ids=scoped_source_ids,
+            note_ids=scoped_note_ids,
+            memory_ids=selected_memory_ids,
+            agent=agent,
+        )
+
+        await record_answer_step(
+            run.id,
+            title="返回回答结果",
+            agent_name="answer_agent",
+            output_json={
+                "agent": agent,
+                "mode": selected_mode,
+                "suggested_followup_count": len(suggested_followups),
+            },
+            evidence_refs=evidence_refs,
+            output_refs=[str(session.id or "")],
+        )
+        await mark_run_completed(
+            run.id,
+            output_json={
+                "agent": agent,
+                "mode": selected_mode,
+                "confidence": confidence,
+                "evidence_card_count": len(evidence_cards),
+                "memory_context_count": len(selected_memory_ids),
+                "thread_id": str(session.id or ""),
+            },
+            tool_calls=["build_multimodal_evidence", "chat_graph.invoke"],
+            evidence_reads=evidence_refs,
+            outputs=[str(session.id or "")],
+        )
+
+        return response
     except Exception as exc:
         await mark_run_failed(run.id, str(exc))
         raise
@@ -545,10 +725,18 @@ async def followup_project_thread(
     question: str,
     *,
     mode: ProjectAskMode = "auto",
+    source_ids: Optional[list[str]] = None,
+    note_ids: Optional[list[str]] = None,
+    memory_ids: Optional[list[str]] = None,
+    agent: Optional[str] = None,
 ) -> AskResponse:
     return await ask_project(
         project_id,
         question,
         mode=mode,
         thread_id=thread_id,
+        source_ids=source_ids,
+        note_ids=note_ids,
+        memory_ids=memory_ids,
+        agent=agent,
     )

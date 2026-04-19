@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from api.project_memory_service import (
+    create_memory_record,
     delete_memory_record,
     list_memory_records,
     queue_project_memory_rebuild,
@@ -62,6 +63,43 @@ async def test_list_memory_records_returns_memory_items(
         "project:demo",
         include_deprecated=True,
     )
+
+
+@pytest.mark.asyncio
+@patch("api.project_memory_service.save_project_memory_record", new_callable=AsyncMock)
+@patch("api.project_memory_service.project_workspace_service.get_project", new_callable=AsyncMock)
+async def test_create_memory_record_normalizes_manual_memory(
+    mock_get_project,
+    mock_save_memory_record,
+):
+    mock_get_project.return_value = ProjectSummary(
+        id="project:demo",
+        name="Demo",
+        description="Demo project",
+        status="active",
+        created_at="2026-04-18T12:00:00Z",
+        updated_at="2026-04-18T12:00:00Z",
+        source_count=2,
+        artifact_count=1,
+        memory_count=1,
+    )
+    mock_save_memory_record.return_value = _memory_record("memory:manual")
+
+    await create_memory_record(
+        "project:demo",
+        text="  评审要求   需要明确列出技术路线。  ",
+        memory_type="fact",
+        status="draft",
+        scope="project",
+        source_refs=[],
+    )
+
+    args, kwargs = mock_save_memory_record.await_args
+    assert args[0] == "project:demo"
+    assert args[1].text == "评审要求 需要明确列出技术路线。"
+    assert args[1].scope == "project"
+    assert args[1].status == "draft"
+    assert kwargs == {"origin": "manual"}
 
 
 @pytest.mark.asyncio

@@ -115,6 +115,14 @@ export interface ProjectMemoryUpdateRequest {
   status?: MemoryStatus
 }
 
+export interface CreateProjectMemoryRequest {
+  text: string
+  scope?: 'project'
+  type: MemoryType
+  status?: MemoryStatus
+  source_refs?: SourceReferenceResponse[]
+}
+
 export interface ProjectMemoryDeleteResponse {
   project_id: string
   memory_id: string
@@ -167,11 +175,19 @@ export interface ProjectAskRequest {
   question: string
   mode?: ProjectAskMode
   thread_id?: string
+  source_ids?: string[]
+  note_ids?: string[]
+  memory_ids?: string[]
+  agent?: string
 }
 
 export interface ProjectFollowupRequest {
   question: string
   mode?: ProjectAskMode
+  source_ids?: string[]
+  note_ids?: string[]
+  memory_ids?: string[]
+  agent?: string
 }
 
 export interface CreateProjectRequest {

@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useCreateDialogs } from '@/lib/hooks/use-create-dialogs'
 import { useCreateDemoProject, useProjects } from '@/lib/hooks/use-projects'
+import { buildAssistantUrl } from '@/lib/assistant-workspace'
 import { formatApiError } from '@/lib/utils/error-handler'
 import {
   ProjectWorkspaceSummary,
@@ -75,7 +76,7 @@ export default function ProjectsPage() {
   const handleCreateOrOpenDemo = async () => {
     try {
       const project = await createDemoProject.mutateAsync()
-      router.push(`/projects/${encodeURIComponent(project.id)}/overview`)
+      router.push(buildAssistantUrl({ projectId: project.id, view: 'knowledge' }))
     } catch {}
   }
 
@@ -154,7 +155,7 @@ export default function ProjectsPage() {
                     <ProjectCard
                       key={project.id}
                       project={project}
-                      href={`/projects/${encodeURIComponent(project.id)}/overview`}
+                      href={buildAssistantUrl({ projectId: project.id, view: 'knowledge' })}
                     />
                   ))}
                 </div>
@@ -191,7 +192,7 @@ export default function ProjectsPage() {
                     </Button>
                     {demoProject ? (
                       <Button asChild variant="outline" className="w-full">
-                        <Link href={`/projects/${encodeURIComponent(demoProject.id)}/overview`}>
+                        <Link href={buildAssistantUrl({ projectId: demoProject.id, view: 'knowledge' })}>
                           打开示例路线
                         </Link>
                       </Button>

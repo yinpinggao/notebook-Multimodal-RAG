@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from typing import Optional
+from uuid import uuid4
 
 from open_notebook.agent_harness import (
     create_project_run,
     mark_run_failed,
     record_step,
 )
-from open_notebook.domain.memory import MemoryRecord
+from open_notebook.domain.memory import MemoryRecord, SourceReference
 from open_notebook.exceptions import InvalidInputError
 from open_notebook.jobs import async_submit_command
 from open_notebook.memory_center import (
@@ -16,6 +17,12 @@ from open_notebook.memory_center import (
     mark_project_memory_status,
     update_project_memory,
 )
+from open_notebook.memory_center.memory_policy import (
+    clamp_confidence,
+    decay_policy_for_type,
+    normalize_memory_text,
+)
+from open_notebook.memory_center.powermem_adapter import save_project_memory_record
 
 from . import project_workspace_service
 
@@ -43,6 +50,44 @@ async def update_memory_record(
         memory_id,
         text=normalized_text,
         status=status,
+    )
+
+
+async def create_memory_record(
+    project_id: str,
+    *,
+    text: str,
+    memory_type: str,
+    status: str = "draft",
+    scope: str = "project",
+    source_refs: Optional[list[SourceReference]] = None,
+) -> MemoryRecord:
+    await project_workspace_service.get_project(project_id)
+
+    normalized_text = normalize_memory_text(text)
+    if not normalized_text:
+        raise InvalidInputError("Memory text cannot be empty")
+    if scope != "project":
+        raise InvalidInputError("Only project-scoped memory is supported")
+
+    references = source_refs or []
+    confidence = clamp_confidence(0.82 if references else 0.58)
+    record = MemoryRecord(
+        id=f"memory:{uuid4().hex[:12]}",
+        scope="project",
+        type=memory_type,
+        text=normalized_text,
+        confidence=confidence,
+        freshness=None,
+        source_refs=references,
+        status=status,
+        decay_policy=decay_policy_for_type(memory_type),
+        conflict_group=None,
+    )
+    return await save_project_memory_record(
+        project_id,
+        record,
+        origin="manual",
     )
 
 
@@ -109,6 +154,7 @@ async def queue_project_memory_rebuild(project_id: str) -> dict[str, str | None]
 
 
 __all__ = [
+    "create_memory_record",
     "delete_memory_record",
     "list_memory_records",
     "queue_project_memory_rebuild",

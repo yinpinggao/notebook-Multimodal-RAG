@@ -1,14 +1,18 @@
-'use client'
+import { redirect } from 'next/navigation'
 
-import { useParams } from 'next/navigation'
-
-import { ProjectEvidenceWorkspace } from '@/components/evidence/project-evidence-workspace'
+import { buildAssistantUrl } from '@/lib/assistant-workspace'
 import { projectIdToNotebookId } from '@/lib/project-alias'
 
-export default function ProjectEvidencePage() {
-  const params = useParams()
-  const routeProjectId = params?.projectId ? String(params.projectId) : ''
-  const projectId = projectIdToNotebookId(routeProjectId)
-
-  return <ProjectEvidenceWorkspace projectId={projectId} />
+export default async function ProjectEvidencePageRedirect({
+  params,
+}: {
+  params: Promise<{ projectId: string }>
+}) {
+  const { projectId } = await params
+  redirect(
+    buildAssistantUrl({
+      projectId: projectIdToNotebookId(projectId),
+      view: 'workspace',
+    })
+  )
 }

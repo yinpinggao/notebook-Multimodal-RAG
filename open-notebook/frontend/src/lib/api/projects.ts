@@ -3,6 +3,7 @@ import {
   AgentRunResponse,
   ArtifactRecordResponse,
   CreateProjectRequest,
+  CreateProjectMemoryRequest,
   EvidenceThreadDetailResponse,
   EvidenceThreadSummaryResponse,
   MemoryRecordResponse,
@@ -52,6 +53,14 @@ export const projectsApi = {
 
   listMemory: async (id: string) => {
     const response = await apiClient.get<MemoryRecordResponse[]>(`/projects/${id}/memory`)
+    return response.data
+  },
+
+  createMemory: async (id: string, data: CreateProjectMemoryRequest) => {
+    const response = await apiClient.post<MemoryRecordResponse>(
+      `/projects/${id}/memory`,
+      data
+    )
     return response.data
   },
 
