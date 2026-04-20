@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from typing import Optional
 
 from api.schemas import ProjectSummary
-from open_notebook.agent_harness import get_project_last_run_at
+from open_notebook.agent_harness import list_project_runs
+from open_notebook.domain.artifacts import ArtifactRecord
+from open_notebook.domain.runs import AgentRun
 from open_notebook.memory_center import count_project_memories
 from open_notebook.domain.notebook import Notebook
 from open_notebook.exceptions import NotFoundError
@@ -13,12 +16,75 @@ from open_notebook.project_os.demo_service import ensure_demo_project
 from open_notebook.seekdb import seekdb_business_store
 
 
+@dataclass(frozen=True)
+class ProjectRuntimeSummary:
+    artifact_count: int
+    memory_count: int
+    last_run_at: Optional[str]
+    phase: str
+    latest_output_title: Optional[str]
+    latest_run_status: Optional[str]
+
+
+RUNS_PHASE_STATUSES = {"failed", "waiting_review", "cancelled"}
+RUN_TYPE_PHASES = {
+    "ask": "ask",
+    "compare": "compare",
+    "artifact": "outputs",
+    "memory_rebuild": "memory",
+    "overview_rebuild": "collect",
+    "ingest": "collect",
+    "unknown": "collect",
+}
+
+
+def _run_activity_at(run: AgentRun) -> str:
+    return run.completed_at or run.started_at or run.created_at
+
+
+def _latest_active_artifact(
+    artifacts: list[ArtifactRecord],
+) -> ArtifactRecord | None:
+    for artifact in artifacts:
+        if artifact.status not in {"archived", "failed"}:
+            return artifact
+    return None
+
+
+def derive_project_phase(
+    *,
+    source_count: int,
+    memory_count: int,
+    latest_run: AgentRun | None,
+    latest_artifact: ArtifactRecord | None,
+) -> str:
+    if latest_run and latest_run.status in RUNS_PHASE_STATUSES:
+        return "runs"
+
+    if latest_run:
+        return RUN_TYPE_PHASES.get(latest_run.run_type, "collect")
+
+    if latest_artifact:
+        return "outputs"
+
+    if memory_count > 0:
+        return "memory"
+
+    if source_count > 0:
+        return "ask"
+
+    return "collect"
+
+
 def _row_to_project_summary(
     row: dict,
     *,
     artifact_count: int = 0,
     memory_count: int = 0,
     last_run_at: Optional[str] = None,
+    phase: str = "collect",
+    latest_output_title: Optional[str] = None,
+    latest_run_status: Optional[str] = None,
 ) -> ProjectSummary:
     archived = bool(row.get("archived", False))
     return ProjectSummary(
@@ -32,6 +98,9 @@ def _row_to_project_summary(
         artifact_count=artifact_count,
         memory_count=memory_count,
         last_run_at=last_run_at,
+        phase=phase,
+        latest_output_title=latest_output_title,
+        latest_run_status=latest_run_status,
     )
 
 
@@ -41,6 +110,9 @@ def _notebook_to_project_summary(
     artifact_count: int = 0,
     memory_count: int = 0,
     last_run_at: Optional[str] = None,
+    phase: str = "collect",
+    latest_output_title: Optional[str] = None,
+    latest_run_status: Optional[str] = None,
 ) -> ProjectSummary:
     return ProjectSummary(
         id=str(notebook.id or ""),
@@ -53,13 +125,16 @@ def _notebook_to_project_summary(
         artifact_count=artifact_count,
         memory_count=memory_count,
         last_run_at=last_run_at,
+        phase=phase,
+        latest_output_title=latest_output_title,
+        latest_run_status=latest_run_status,
     )
 
 
-async def _artifact_count_for_project(project_id: str) -> int:
+async def _artifacts_for_project(project_id: str) -> list[ArtifactRecord]:
     if not project_id:
-        return 0
-    return await project_os_artifact_service.count_project_artifacts(project_id)
+        return []
+    return await project_os_artifact_service.list_project_artifacts(project_id, limit=1000)
 
 
 async def _memory_count_for_project(project_id: str) -> int:
@@ -68,10 +143,41 @@ async def _memory_count_for_project(project_id: str) -> int:
     return await count_project_memories(project_id)
 
 
-async def _last_run_at_for_project(project_id: str) -> Optional[str]:
+async def _latest_run_for_project(project_id: str) -> AgentRun | None:
     if not project_id:
         return None
-    return await get_project_last_run_at(project_id)
+    runs = await list_project_runs(project_id, limit=1)
+    return runs[0] if runs else None
+
+
+async def _project_runtime_summary(
+    project_id: str,
+    *,
+    source_count: int,
+) -> ProjectRuntimeSummary:
+    artifacts, memory_count, latest_run = await asyncio.gather(
+        _artifacts_for_project(project_id),
+        _memory_count_for_project(project_id),
+        _latest_run_for_project(project_id),
+    )
+    active_artifacts = [
+        artifact for artifact in artifacts if artifact.status not in {"archived", "failed"}
+    ]
+    latest_artifact = _latest_active_artifact(artifacts)
+
+    return ProjectRuntimeSummary(
+        artifact_count=len(active_artifacts),
+        memory_count=memory_count,
+        last_run_at=_run_activity_at(latest_run) if latest_run else None,
+        phase=derive_project_phase(
+            source_count=source_count,
+            memory_count=memory_count,
+            latest_run=latest_run,
+            latest_artifact=latest_artifact,
+        ),
+        latest_output_title=latest_artifact.title if latest_artifact else None,
+        latest_run_status=latest_run.status if latest_run else None,
+    )
 
 
 async def list_projects(
@@ -83,27 +189,28 @@ async def list_projects(
     if archived is not None:
         rows = [row for row in rows if bool(row.get("archived", False)) == archived]
 
-    artifact_counts = await asyncio.gather(
-        *[_artifact_count_for_project(str(row.get("id", ""))) for row in rows]
-    )
-    memory_counts = await asyncio.gather(
-        *[_memory_count_for_project(str(row.get("id", ""))) for row in rows]
-    )
-    last_run_ats = await asyncio.gather(
-        *[_last_run_at_for_project(str(row.get("id", ""))) for row in rows]
+    runtime_summaries = await asyncio.gather(
+        *[
+            _project_runtime_summary(
+                str(row.get("id", "")),
+                source_count=int(row.get("source_count") or 0),
+            )
+            for row in rows
+        ]
     )
     return [
         _row_to_project_summary(
             row,
-            artifact_count=artifact_count,
-            memory_count=memory_count,
-            last_run_at=last_run_at,
+            artifact_count=runtime_summary.artifact_count,
+            memory_count=runtime_summary.memory_count,
+            last_run_at=runtime_summary.last_run_at,
+            phase=runtime_summary.phase,
+            latest_output_title=runtime_summary.latest_output_title,
+            latest_run_status=runtime_summary.latest_run_status,
         )
-        for row, artifact_count, memory_count, last_run_at in zip(
+        for row, runtime_summary in zip(
             rows,
-            artifact_counts,
-            memory_counts,
-            last_run_ats,
+            runtime_summaries,
             strict=False,
         )
     ]
@@ -114,16 +221,18 @@ async def get_project(project_id: str) -> ProjectSummary:
     if not row:
         raise NotFoundError("Project not found")
 
-    artifact_count, memory_count, last_run_at = await asyncio.gather(
-        _artifact_count_for_project(project_id),
-        _memory_count_for_project(project_id),
-        _last_run_at_for_project(project_id),
+    runtime_summary = await _project_runtime_summary(
+        project_id,
+        source_count=int(row.get("source_count") or 0),
     )
     return _row_to_project_summary(
         row,
-        artifact_count=artifact_count,
-        memory_count=memory_count,
-        last_run_at=last_run_at,
+        artifact_count=runtime_summary.artifact_count,
+        memory_count=runtime_summary.memory_count,
+        last_run_at=runtime_summary.last_run_at,
+        phase=runtime_summary.phase,
+        latest_output_title=runtime_summary.latest_output_title,
+        latest_run_status=runtime_summary.latest_run_status,
     )
 
 

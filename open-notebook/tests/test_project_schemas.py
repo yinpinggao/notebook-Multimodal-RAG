@@ -99,6 +99,20 @@ def test_prd_field_names_are_used_in_serialized_contracts():
     assert "step_index" in step.model_dump()
     assert "run_type" in recent_run.model_dump()
     assert "artifact_type" in recent_artifact.model_dump()
+    summary = ProjectSummary(
+        id="project:summary",
+        name="Summary",
+        description="",
+        status="active",
+        created_at="2026-04-18T10:00:00Z",
+        updated_at="2026-04-18T10:00:00Z",
+        source_count=0,
+        artifact_count=0,
+        memory_count=0,
+    )
+    assert "phase" in summary.model_dump()
+    assert "latest_output_title" in summary.model_dump()
+    assert "latest_run_status" in summary.model_dump()
 
 
 def test_transition_aliases_are_still_accepted():

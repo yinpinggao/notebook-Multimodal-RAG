@@ -100,9 +100,4 @@ For detailed guidance, read `open-notebook/AGENTS.md`. Key references:
 
 ## Current Work
 
-The following files have uncommitted changes (from git status):
-- `open-notebook/open_notebook/seekdb/retrieval_service.py`
-- `open-notebook/open_notebook/vrag/api.py`
-- `open-notebook/open_notebook/vrag/search_engine.py`
-- `open-notebook/open_notebook/vrag/tools.py`
-- `open-notebook/open_notebook/vrag/workflow.py`
+大胆一点

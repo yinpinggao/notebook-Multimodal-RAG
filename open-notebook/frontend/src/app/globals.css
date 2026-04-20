@@ -4,8 +4,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: Inter, Roboto, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SFMono-Regular", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -39,6 +39,15 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --color-zyc-bg: var(--zyc-bg);
+  --color-zyc-panel: var(--zyc-panel);
+  --color-zyc-panel-2: var(--zyc-panel-2);
+  --color-zyc-glass: var(--zyc-glass);
+  --color-zyc-evidence: var(--zyc-evidence);
+  --color-zyc-compare: var(--zyc-compare);
+  --color-zyc-memory: var(--zyc-memory);
+  --color-zyc-output: var(--zyc-output);
+  --color-zyc-runs: var(--zyc-runs);
 }
 
 :root {
@@ -74,6 +83,15 @@
   --sidebar-accent-foreground: oklch(0.22 0.02 180);
   --sidebar-border: oklch(0.91 0.01 220);
   --sidebar-ring: oklch(0.58 0.14 170);
+  --zyc-bg: #121212;
+  --zyc-panel: rgba(27, 28, 32, 0.94);
+  --zyc-panel-2: rgba(32, 34, 39, 0.96);
+  --zyc-glass: rgba(255, 255, 255, 0.08);
+  --zyc-evidence: #47b6ff;
+  --zyc-compare: #f0ae43;
+  --zyc-memory: #9f71ff;
+  --zyc-output: #53c27b;
+  --zyc-runs: #8a8f98;
 }
 
 .dark {
@@ -108,6 +126,15 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.72 0.12 170);
+  --zyc-bg: #121212;
+  --zyc-panel: rgba(24, 25, 28, 0.96);
+  --zyc-panel-2: rgba(30, 32, 37, 0.98);
+  --zyc-glass: rgba(255, 255, 255, 0.08);
+  --zyc-evidence: #47b6ff;
+  --zyc-compare: #f0ae43;
+  --zyc-memory: #9f71ff;
+  --zyc-output: #53c27b;
+  --zyc-runs: #8a8f98;
 }
 
 @layer base {
@@ -187,5 +214,157 @@
 
   .clickable-card * {
     cursor: pointer !important;
+  }
+
+  .zyc-shell {
+    background:
+      radial-gradient(circle at top left, rgba(71, 182, 255, 0.08), transparent 28%),
+      radial-gradient(circle at top right, rgba(159, 113, 255, 0.08), transparent 26%),
+      radial-gradient(circle at bottom center, rgba(83, 194, 123, 0.07), transparent 30%),
+      var(--zyc-bg);
+    color: #f5f7fa;
+  }
+
+  .zyc-glass {
+    background: color-mix(in srgb, var(--zyc-panel) 82%, transparent);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.22);
+  }
+
+  .zyc-panel {
+    background: linear-gradient(180deg, rgba(32, 34, 39, 0.96), rgba(23, 24, 27, 0.96));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .zyc-panel-muted {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .zyc-touch {
+    min-height: 44px;
+  }
+
+  .zyc-underline-input {
+    border: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+    background: transparent;
+    transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+  }
+
+  .zyc-underline-input:focus {
+    border-bottom-color: rgba(255, 255, 255, 0.7);
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.55);
+  }
+
+  .zyc-hover-lift {
+    transition:
+      transform 180ms ease,
+      box-shadow 180ms ease,
+      filter 180ms ease,
+      border-color 180ms ease;
+  }
+
+  .zyc-hover-lift:hover {
+    transform: scale(1.02);
+    filter: brightness(1.04);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
+  }
+
+  .zyc-ripple {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .zyc-ripple::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.18) 0%, transparent 62%);
+    opacity: 0;
+    transform: scale(0.8);
+    transition: opacity 180ms ease, transform 180ms ease;
+    pointer-events: none;
+  }
+
+  .zyc-ripple:active::after {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+
+  .zyc-page-enter {
+    animation: zyc-page-slide-in 240ms ease;
+  }
+
+  .zyc-modal-enter {
+    animation: zyc-modal-fade-in 200ms ease;
+  }
+
+  .zyc-masonry {
+    columns: 3 18rem;
+    column-gap: 1rem;
+  }
+
+  .zyc-waterfall {
+    columns: 2 20rem;
+    column-gap: 1rem;
+  }
+
+  .zyc-masonry > *,
+  .zyc-waterfall > * {
+    break-inside: avoid;
+    margin-bottom: 1rem;
+  }
+
+  .zyc-scrollbar {
+    scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  }
+
+  .zyc-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .zyc-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+  }
+
+  .zyc-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@media (max-width: 1023px) {
+  .zyc-masonry,
+  .zyc-waterfall {
+    columns: 1;
+  }
+}
+
+@keyframes zyc-page-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes zyc-modal-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

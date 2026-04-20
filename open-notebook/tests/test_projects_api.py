@@ -48,6 +48,9 @@ def test_get_projects_returns_project_contract(mock_list_projects, client):
             "artifact_count": 0,
             "memory_count": 0,
             "last_run_at": None,
+            "phase": "collect",
+            "latest_output_title": None,
+            "latest_run_status": None,
         }
     ]
 

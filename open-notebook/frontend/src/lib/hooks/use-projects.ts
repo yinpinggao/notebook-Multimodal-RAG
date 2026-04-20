@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { projectsApi } from '@/lib/api/projects'
 import { QUERY_KEYS } from '@/lib/api/query-client'
+import { CreateProjectRequest } from '@/lib/types/api'
 
 export function useProjects(archived?: boolean) {
   return useQuery({
@@ -23,6 +24,22 @@ export function useCreateDemoProject() {
 
   return useMutation({
     mutationFn: () => projectsApi.createDemo(),
+    onSuccess: async (project) => {
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projects,
+      })
+      await queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.projectOverview(project.id),
+      })
+    },
+  })
+}
+
+export function useCreateProject() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: CreateProjectRequest) => projectsApi.create(data),
     onSuccess: async (project) => {
       await queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.projects,

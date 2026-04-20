@@ -1,16 +1,47 @@
 import '@testing-library/jest-dom'
+import React from 'react'
 import { vi } from 'vitest'
 import { enUS } from '../lib/locales/en-US'
+
+export const mockPush = vi.fn()
+export const mockReplace = vi.fn()
+export const mockPrefetch = vi.fn()
+export const mockUsePathname = vi.fn(() => '')
+export const mockUseSearchParams = vi.fn(() => new URLSearchParams())
+export const mockUseParams = vi.fn(() => ({}))
+export const mockRedirect = vi.fn()
 
 // Mock next/navigation
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
-    push: vi.fn(),
-    replace: vi.fn(),
-    prefetch: vi.fn(),
+    push: mockPush,
+    replace: mockReplace,
+    prefetch: mockPrefetch,
   }),
-  usePathname: () => '',
-  useSearchParams: () => new URLSearchParams(),
+  usePathname: mockUsePathname,
+  useSearchParams: mockUseSearchParams,
+  useParams: mockUseParams,
+  redirect: mockRedirect,
+}))
+
+vi.mock('next/image', () => ({
+  default: (props: React.ImgHTMLAttributes<HTMLImageElement> & { fill?: boolean }) =>
+    React.createElement('img', {
+      ...Object.fromEntries(
+        Object.entries(props).filter(([key]) => key !== 'fill')
+      ),
+      alt: props.alt || '',
+    }),
+}))
+
+vi.mock('next/link', () => ({
+  default: ({
+    children,
+    href,
+    ...props
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
+    React.createElement('a', { href, ...props }, children)
+  ),
 }))
 
 // Mock window.matchMedia

@@ -20,6 +20,9 @@ export interface ProjectSummaryResponse {
   artifact_count: number
   memory_count: number
   last_run_at?: string | null
+  phase?: 'collect' | 'ask' | 'compare' | 'memory' | 'outputs' | 'runs'
+  latest_output_title?: string | null
+  latest_run_status?: string | null
 }
 
 export interface ProjectTimelineEventResponse {

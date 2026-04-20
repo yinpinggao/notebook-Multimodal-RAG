@@ -17,6 +17,9 @@ class _ContractModel(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
+ProjectPhase = Literal["collect", "ask", "compare", "memory", "outputs", "runs"]
+
+
 class ProjectSummary(_ContractModel):
     id: str = Field(..., description="Stable project identifier")
     name: str = Field(..., description="Project display name")
@@ -44,6 +47,18 @@ class ProjectSummary(_ContractModel):
     last_run_at: Optional[str] = Field(
         default=None,
         description="Timestamp of the most recent recorded run",
+    )
+    phase: ProjectPhase = Field(
+        default="collect",
+        description="Derived project phase used by the ZhiyanCang IA",
+    )
+    latest_output_title: Optional[str] = Field(
+        default=None,
+        description="Title of the most recent non-archived artifact",
+    )
+    latest_run_status: Optional[str] = Field(
+        default=None,
+        description="Status of the most recent run",
     )
 
 
@@ -138,6 +153,7 @@ class ProjectOverviewResponse(_ContractModel):
 
 
 __all__ = [
+    "ProjectPhase",
     "ProjectSummary",
     "ProjectTimelineEvent",
     "RecentRunSummary",

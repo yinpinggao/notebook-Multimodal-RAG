@@ -1,10 +1,14 @@
 export type ProjectSection =
   | 'overview'
+  | 'workspace'
   | 'evidence'
   | 'compare'
   | 'memory'
   | 'outputs'
   | 'runs'
+  | 'showcase'
+
+export type GlobalSection = 'projects' | 'library' | 'system'
 
 interface ContinueThreadCandidate {
   id: string
@@ -19,6 +23,18 @@ interface BuildProjectPathParams {
 
 function safeEncode(value: string) {
   return encodeURIComponent(value)
+}
+
+export function buildGlobalPath(section: GlobalSection): string {
+  if (section === 'library') {
+    return '/library'
+  }
+
+  if (section === 'system') {
+    return '/system'
+  }
+
+  return '/projects'
 }
 
 export function buildProjectPath({
